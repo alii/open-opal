@@ -42,6 +42,13 @@ typedef enum {
 // Pipeline configuration (applied at open; changing these requires a reopen)
 // ---------------------------------------------------------------------------
 
+typedef enum {
+    OPAL_ORIENT_NORMAL     = 0,
+    OPAL_ORIENT_ROTATE_180 = 1,
+    OPAL_ORIENT_MIRROR     = 2,
+    OPAL_ORIENT_VFLIP      = 3,
+} OpalOrientation;
+
 typedef struct {
     // The IMX582 ("LCM48") has NO native 1080p mode — its smallest sensor
     // config is 3840x2160. Pulling full 4K NV12 over USB is ~370 MB/s, which
@@ -52,6 +59,13 @@ typedef struct {
     int  ispDen;        // e.g. 2 -> 1920x1080,  3 -> 1280x720
     int  fps;           // 1..42 at 4K sensor mode
     bool keep4K;        // true = no ISP scale (max quality, high latency)
+
+    // The C1's sensor is mounted upside down in the housing. Opal's stock
+    // firmware quietly corrects for this, so nobody ever noticed — but we boot
+    // our own pipeline, so we get the raw sensor orientation and have to undo it
+    // ourselves. The ISP does the rotation for free, which also means the fix
+    // lands upstream of everything: preview, effects, and the virtual camera.
+    OpalOrientation orientation;
 } OpalPipelineConfig;
 
 // ---------------------------------------------------------------------------
@@ -115,6 +129,14 @@ typedef void (*OpalFrameCallback)(const uint8_t* y, size_t yStride,
                                   double latencyMs,
                                   void* ctx);
 
+// --- boot log ----------------------------------------------------------------
+// One human-readable line per stage of the takeover — reset, ROM bootloader,
+// firmware upload, XLink handshake, pipeline instantiation — with real sizes
+// and elapsed times. Set once, before any opal_open; lines arrive on internal
+// threads.
+typedef void (*OpalLogCallback)(const char* line, void* ctx);
+void opal_set_boot_logger(OpalLogCallback cb, void* ctx);
+
 // --- discovery -------------------------------------------------------------
 int  opal_list_devices(OpalDeviceInfo* out, int maxCount);
 
@@ -130,6 +152,10 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c);
 void opal_trigger_autofocus(OpalDeviceHandle* h);
 // Normalized [0,1] rect within the frame; drives AE + AF metering region.
 void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float h_);
+// Auto-exposure metering region only (leaves focus alone). Used to meter on the
+// person rather than the whole frame — with a bright window behind you, a
+// full-frame average blows out the background and leaves your face in shadow.
+void opal_set_exposure_region(OpalDeviceHandle* h, float x, float y, float w, float h_);
 
 // --- introspection ---------------------------------------------------------
 bool  opal_get_info(OpalDeviceHandle* h, char* sensorName, size_t n,

@@ -1,0 +1,96 @@
+name: OpenOpal
+
+options:
+  bundleIdPrefix: com.openopal
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ARCHS: arm64
+    ENABLE_HARDENED_RUNTIME: YES
+    # Ad-hoc signing keeps a local build running without a paid developer
+    # account. The virtual-camera extension will need a real team ID later.
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGNING_ALLOWED: NO
+
+targets:
+  OpenOpal:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/OpenOpal
+      # Compiled Core ML model, fetched by scripts/fetch-models.sh (gitignored —
+      # 50MB, and it's a redistributable upstream artifact).
+      - path: Models/DepthAnythingV2SmallF16.mlmodelc
+        type: folder
+        buildPhase: resources
+        optional: true
+    info:
+      path: Sources/OpenOpal/Info.plist
+      properties:
+        CFBundleName: Open Opal
+        CFBundleDisplayName: Open Opal
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "26.0"
+        NSHumanReadableCopyright: "Open source. Not affiliated with Opal Camera Inc."
+        # We drive the C1 over raw USB rather than as a capture device, so we
+        # don't need NSCameraUsageDescription for the camera itself — but the
+        # preview and any future AVFoundation fallback do.
+        NSCameraUsageDescription: "Open Opal needs access to your Opal C1 camera."
+        LSApplicationCategoryType: public.app-category.video
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+    entitlements:
+      path: Sources/OpenOpal/OpenOpal.entitlements
+      properties:
+        # The sandbox blocks the raw USB access depthai needs. Disabled for now;
+        # revisit if we ever want to ship on the Mac App Store (which would mean
+        # moving USB into a separate helper).
+        com.apple.security.app-sandbox: false
+        com.apple.security.device.usb: true
+        com.apple.security.device.camera: true
+    dependencies:
+      - framework: build/bridge/libOpalBridge.dylib
+        embed: true
+        codeSign: true
+      - framework: vendor/install/lib/libdepthai-core.dylib
+        embed: true
+        codeSign: true
+      - framework: vendor/install/lib/libusb-1.0.dylib
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/OpenOpal/OpenOpal-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/Sources/OpalBridge/include
+        # These are plain dylibs, not frameworks. XcodeGen emits -l for them but
+        # files their location under FRAMEWORK_SEARCH_PATHS, so the linker never
+        # finds them without this.
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/build/bridge
+          - $(SRCROOT)/vendor/install/lib
+        LD_RUNPATH_SEARCH_PATHS:
+          - "@executable_path/../Frameworks"
+        # SwiftUI + Metal + Vision; the bridge brings depthai in transitively.
+        OTHER_LDFLAGS:
+          - -Wl,-rpath,@executable_path/../Frameworks
+    preBuildScripts:
+      - name: Build OpalBridge (depthai)
+        script: |
+          set -e
+          if [ ! -f "$SRCROOT/vendor/install/lib/libdepthai-core.dylib" ]; then
+            echo "error: depthai-core not built. Run ./scripts/bootstrap.sh first."
+            exit 1
+          fi
+          export CMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake -S "$SRCROOT/Sources/OpalBridge" -B "$SRCROOT/build/bridge" \
+                -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
+          cmake --build "$SRCROOT/build/bridge"
+        basedOnDependencyAnalysis: false
