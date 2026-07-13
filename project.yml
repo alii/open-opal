@@ -30,11 +30,14 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      - path: Assets/AppIcon.icns
+        buildPhase: resources
     info:
       path: Sources/OpenOpal/Info.plist
       properties:
         CFBundleName: Open Opal
         CFBundleDisplayName: Open Opal
+        CFBundleIconFile: AppIcon
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "26.0"

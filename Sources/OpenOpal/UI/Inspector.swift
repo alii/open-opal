@@ -73,6 +73,7 @@ struct Inspector: View {
                 // style keeps it from gel-squishing on press.
                 GlassEffectContainer {
                 Button {
+                    camera.holdPreviewDuringAnimation()
                     if settings.showAdvanced {
                         // Swap the block for its own ghost in one frame, then
                         // melt the ghost AND drive the scroll home in the same

@@ -78,7 +78,10 @@ struct ContentView: View {
                 // stable icon that highlights when the panel is open — which is
                 // exactly what toggleStyle(.button) gives you, for free, with the
                 // right selected-state appearance and accessibility semantics.
-                Toggle(isOn: $showInspector) {
+                Toggle(isOn: Binding(
+                    get: { showInspector },
+                    set: { showInspector = $0; camera.holdPreviewDuringAnimation() }
+                )) {
                     Label("Controls", systemImage: "sidebar.trailing")
                 }
                 .toggleStyle(.button)
@@ -99,7 +102,8 @@ struct ContentView: View {
         GeometryReader { geo in
             ZStack {
                 MetalPreview(texture: camera.latestTexture,
-                             mirrored: camera.settings.mirrorPreview) { viewPoint, sensorPoint in
+                             mirrored: camera.settings.mirrorPreview,
+                             paused: camera.previewPaused) { viewPoint, sensorPoint in
                     // The camera is told where to focus in SENSOR space; the
                     // reticle is drawn where the user actually clicked. Using the
                     // sensor point for both is what made the box land mirrored.

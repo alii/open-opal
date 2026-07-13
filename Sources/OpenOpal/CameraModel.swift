@@ -22,6 +22,30 @@ final class CameraModel {
 
     var isRebooting = false
 
+    /// Freeze the preview's draw loop. Manual (⌘⇧F), or automatically for the
+    /// half-second a panel animation runs.
+    ///
+    /// Why: the glass panels are composited by the system, and glass re-blurs
+    /// whatever sits behind it. Behind ours is video changing every 33ms — so
+    /// during a panel animation the compositor is re-rendering moving backdrops
+    /// over moving content at animation rate, off in WindowServer where our
+    /// process profiles as idle. Freezing the video for the duration of the
+    /// spring makes the backdrop static and that whole cost collapses.
+    var previewFrozen = false
+    private(set) var animationHold = false
+    var previewPaused: Bool { previewFrozen || animationHold }
+
+    private var holdGeneration = 0
+    func holdPreviewDuringAnimation(_ duration: Double = 0.6) {
+        animationHold = true
+        holdGeneration += 1
+        let gen = holdGeneration
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(duration))
+            if gen == holdGeneration { animationHold = false }
+        }
+    }
+
     /// Caps concurrent frames at the mask provider's lane count — more would
     /// just block on a lane anyway. Lock-based because the frame callback runs
     /// on the capture thread, not the main actor.

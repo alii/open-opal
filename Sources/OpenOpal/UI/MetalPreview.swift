@@ -12,6 +12,9 @@ import simd
 struct MetalPreview: NSViewRepresentable {
     var texture: MTLTexture?
     var mirrored: Bool
+    /// Freezes the draw loop (shows the last frame). Used while panel
+    /// animations run so the glass above isn't re-blurring moving video.
+    var paused: Bool = false
 
     /// Two different coordinate spaces, and conflating them is a bug waiting to
     /// happen: `view` is where the click landed on screen (draw the reticle
@@ -38,6 +41,7 @@ struct MetalPreview: NSViewRepresentable {
     func updateNSView(_ view: MTKView, context: Context) {
         context.coordinator.texture = texture
         context.coordinator.mirrored = mirrored
+        view.isPaused = paused
         if let tapView = view as? TapMTKView { bindTap(tapView, context.coordinator) }
     }
 

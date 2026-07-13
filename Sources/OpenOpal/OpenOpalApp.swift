@@ -32,6 +32,11 @@ struct OpenOpalApp: App {
 
                 Button("Toggle Advanced Settings") { camera.settings.showAdvanced.toggle() }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
+
+                Button(camera.previewFrozen ? "Unfreeze Preview" : "Freeze Preview") {
+                    camera.previewFrozen.toggle()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             }
         }
     }
