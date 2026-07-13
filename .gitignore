@@ -1,0 +1,42 @@
+# ---- Build output ----
+build/
+DerivedData/
+*.o
+*.a
+*.dylib
+*.dSYM/
+
+# ---- Xcode ----
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+.swiftpm/
+.build/
+
+# The Xcode project is generated from project.yml by XcodeGen (`make project`),
+# so it's a build artifact, not source. Regenerate it, don't commit it.
+OpenOpal.xcodeproj/
+
+# ---- Vendored native deps ----
+# depthai-core is fetched AND patched by scripts/bootstrap.sh (see the zlib pin
+# it applies). Checking in a patched nested git repo would be a mess.
+vendor/
+
+# Hunter's package cache, if it ever lands in-tree
+.hunter/
+
+# ---- Core ML models ----
+# Depth Anything V2 (~50MB) is downloaded by scripts/fetch-models.sh rather than
+# committed — too big for git, and it's a redistributable upstream artifact.
+Models/*.mlpackage/
+Models/*.mlmodelc/
+
+# ---- Python (probe/reverse-engineering scripts only; not part of the app) ----
+.venv/
+__pycache__/
+*.pyc
+
+# ---- macOS ----
+.DS_Store
