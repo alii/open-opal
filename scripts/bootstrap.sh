@@ -66,5 +66,18 @@ cmake --build "$BUILD" --parallel
 echo "==> installing to $PREFIX"
 cmake --install "$BUILD"
 
+# depthai-core links libusb at runtime, but Hunter builds it as a private
+# dependency and doesn't install it alongside depthai. The app links -lusb-1.0,
+# so stage Hunter's copy into the install prefix. (Previously done by hand on
+# one machine, which is why clean checkouts — CI, fresh clones — couldn't link.)
+echo "==> staging libusb"
+LIBUSB=$(find "$HOME/.hunter" -name "libusb-1.0*.dylib" -type f 2>/dev/null | head -1)
+if [ -n "$LIBUSB" ]; then
+  cp "$LIBUSB" "$PREFIX/lib/libusb-1.0.dylib"
+  echo "    $LIBUSB -> $PREFIX/lib/"
+else
+  echo "    WARNING: libusb not found in Hunter cache; the app link step will fail"
+fi
+
 echo
 echo "done. depthai-core -> $PREFIX"
