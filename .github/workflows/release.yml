@@ -1,0 +1,122 @@
+name: Release
+
+# Push a tag like v0.1.0 to build, sign, notarize, and publish a DMG.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:   # or run it by hand from the Actions tab
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  build:
+    # Needs the macOS 26 image for Xcode 26 / the Liquid Glass SDK. If the
+    # runner label changes, bump it here.
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install cmake ninja xcodegen create-dmg
+
+      # depthai-core builds all its dependencies from source via Hunter — several
+      # minutes the first time. Cache the Hunter store and our install prefix,
+      # keyed on the pinned tag and our patched dependency config so it only
+      # rebuilds when those actually change.
+      - name: Cache depthai-core
+        id: cache-depthai
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.hunter
+            vendor/install
+          key: depthai-v2.30.0-${{ hashFiles('scripts/bootstrap.sh') }}
+
+      - name: Build depthai-core
+        if: steps.cache-depthai.outputs.cache-hit != 'true'
+        run: ./scripts/bootstrap.sh
+
+      - name: Fetch Core ML model
+        run: ./scripts/fetch-models.sh
+
+      # --- Signing setup -------------------------------------------------------
+      # A throwaway keychain holds the imported Developer ID identity for the
+      # length of the job, then is discarded with the runner.
+      - name: Import signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          # Let codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # Make the throwaway keychain visible to the signing tools.
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+      - name: Install provisioning profiles
+        env:
+          APP_PROFILE_BASE64: ${{ secrets.APP_PROFILE_BASE64 }}
+          CAMERA_PROFILE_BASE64: ${{ secrets.CAMERA_PROFILE_BASE64 }}
+        run: |
+          mkdir -p Provisioning
+          echo "$APP_PROFILE_BASE64"    | base64 --decode > Provisioning/OpenOpal.provisionprofile
+          echo "$CAMERA_PROFILE_BASE64" | base64 --decode > Provisioning/OpenOpalCameraExtension.provisionprofile
+
+      # --- Build / sign / notarize --------------------------------------------
+      - name: Build, sign, notarize
+        env:
+          CI: "true"
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: ./scripts/release.sh
+
+      - name: Package DMG
+        run: |
+          APP="build/DerivedData/Build/Products/Release/OpenOpal.app"
+          create-dmg \
+            --volname "Open Opal" \
+            --window-size 540 380 \
+            --icon-size 100 \
+            --icon "OpenOpal.app" 150 190 \
+            --app-drop-link 390 190 \
+            --no-internet-enable \
+            "OpenOpal-${{ github.ref_name }}.dmg" "$APP" || \
+          create-dmg "OpenOpal-${{ github.ref_name }}.dmg" "$APP"
+
+      # A DMG signed and notarized inside doesn't carry its own ticket; notarize
+      # and staple the DMG itself so Gatekeeper is happy on first open.
+      - name: Notarize DMG
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          DMG="OpenOpal-${{ github.ref_name }}.dmg"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" \
+            --password "$NOTARY_PASSWORD" --wait
+          xcrun stapler staple "$DMG"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: OpenOpal-${{ github.ref_name }}.dmg
+          generate_release_notes: true
+          body: |
+            Download the DMG, drag Open Opal to Applications, and launch it.
+
+            For the virtual camera, open **Advanced → Virtual Camera → Install
+            virtual camera** and approve it in System Settings when prompted.

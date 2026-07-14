@@ -39,7 +39,14 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
 echo "==> submitting to Apple (this usually takes 1-5 minutes)"
-xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
+if [ -n "${NOTARY_APPLE_ID:-}" ]; then
+  # CI path: credentials come from the environment, not a stored profile.
+  xcrun notarytool submit "$ZIP" \
+    --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" \
+    --password "$NOTARY_PASSWORD" --wait
+else
+  xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
+fi
 
 echo "==> stapling the ticket"
 # Staple the APP ONLY. Stapling writes the ticket file INTO the target bundle —
@@ -50,6 +57,11 @@ xcrun stapler staple "$APP"
 
 echo "==> verifying Gatekeeper accepts it"
 spctl -a -vvv -t exec "$APP"
+
+if [ -n "${CI:-}" ]; then
+  echo "done. Notarized app at: $APP"
+  exit 0
+fi
 
 echo "==> installing to /Applications"
 osascript -e 'quit app "OpenOpal"' 2>/dev/null || true
