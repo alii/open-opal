@@ -1,10 +1,11 @@
 name: Release
 
 # Push a tag like v0.1.0 to build, sign, notarize, and publish a DMG.
+# Tag-driven on purpose: GitHub Releases are anchored to tags, so every release
+# is an immutable snapshot with an auto-generated changelog since the last tag.
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:   # or run it by hand from the Actions tab
 
 permissions:
   contents: write   # needed to create the GitHub Release
