@@ -13,6 +13,13 @@ final class CameraModel {
     let settings = CameraSettings()
     private(set) var renderer: BokehRenderer?
 
+    /// Virtual camera: system-extension installer and the sink feeder. The
+    /// feeder polls for the device — the extension may activate minutes after
+    /// install, or already be running from a previous launch.
+    let installer = ExtensionInstaller()
+    let feeder = VirtualCameraFeeder()
+    private var feederPollStarted = false
+
     /// The freshest rendered texture, handed to the preview each vsync.
     private(set) var latestTexture: MTLTexture?
 
@@ -113,11 +120,28 @@ final class CameraModel {
                 let texture = TexBox(t: renderer.render(pixelBuffer: frame.buffer,
                                                         settings: snapshot))
 
+                // Feed the virtual camera the exact frame the preview shows —
+                // processed, un-mirrored. Off-main, like everything else here.
+                if let t = texture.t, self.feeder.connected,
+                   let pb = renderer.exportFrame(t) {
+                    self.feeder.send(pb)
+                }
+
                 await MainActor.run {
                     if seq >= self.presentedSequence {
                         self.presentedSequence = seq
                         self.latestTexture = texture.t
                     }
+                }
+            }
+        }
+
+        if !feederPollStarted {
+            feederPollStarted = true
+            Task { [feeder] in
+                while true {
+                    feeder.connectIfNeeded()
+                    try? await Task.sleep(for: .seconds(3))
                 }
             }
         }

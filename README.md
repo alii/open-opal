@@ -99,12 +99,19 @@ optional depth-graded mode uses
 [Depth Anything V2](https://huggingface.co/apple/coreml-depth-anything-v2-small)
 for distance-based falloff.
 
+## Virtual camera
+
+Open Opal installs a CoreMediaIO system extension that publishes **"Open Opal
+Camera"** to every app on the Mac — Zoom, Meet, FaceTime, anything. It carries
+the processed image, blur and all. When the app isn't running it shows a placard
+rather than a frozen frame.
+
+Installing it requires a signed and notarized build; see
+[docs/SIGNING.md](docs/SIGNING.md). The app itself runs fine unsigned.
+
 ## Status
 
-Working: camera control, live preview, background blur.
-
-Planned: a CoreMediaIO virtual camera, so the processed feed shows up in Zoom
-and friends.
+Working: camera control, live preview, background blur, virtual camera.
 
 ## License
 

@@ -57,52 +57,105 @@ struct Inspector: View {
                     Toggle("Expose for my face", isOn: $settings.meterOnSubject)
                 }
 
-                // A Button, not a Toggle — a disclosure control's state is shown
-                // by the open panel and the chevron, so it needs no "on" fill
-                // (and buttons sidestep the light/dark × focused/unfocused fill
-                // matrix that made every hand-painted attempt wrong somewhere).
+                Section("Virtual Camera", icon: "video.badge.checkmark", in: glass) {
+                    switch camera.installer.status {
+                    case .installed:
+                        if camera.feeder.connected {
+                            Note("Live — pick “Open Opal Camera” in Zoom, Meet, or FaceTime.",
+                                 tone: .hint)
+                        } else {
+                            Note("Installed. Waiting for the camera device to come up…",
+                                 tone: .hint)
+                        }
+                    case .installing:
+                        Note("Installing…", tone: .hint)
+                    case .needsApproval:
+                        Note("Approve the extension in System Settings → General → Login Items & Extensions, then it activates on its own.",
+                             tone: .warning)
+                    case .failed(let message):
+                        Note(message, tone: .warning)
+                        if !camera.installer.diagnostics.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(camera.installer.diagnostics, id: \.self) { line in
+                                    Text(line)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        Button("Try again") { camera.installer.install() }
+                            .buttonStyle(.glass)
+                            .controlSize(.small)
+                    case .unknown:
+                        Note("Puts the processed image — blur and all — into every video app as “Open Opal Camera”.",
+                             tone: .hint)
+                        Button {
+                            camera.installer.install()
+                        } label: {
+                            Label("Install virtual camera", systemImage: "arrow.down.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.small)
+                    }
+                }
+
+                // A disclosure button, built to Apple's actual spec.
                 //
-                // It sits in its OWN GlassEffectContainer, which is the whole
-                // trick: glass is the right material over live video (a flat
-                // tint was invisible and left bare text floating on the image),
-                // but any glass shape in the outer container joins its liquid
-                // blending — scrolling dragged the sections within merge
-                // distance and visibly pulled the button's shape toward them.
-                // Containers don't blend across nesting, so this one keeps the
-                // legible glass chip with none of the goo, and the plain button
-                // style keeps it from gel-squishing on press.
-                GlassEffectContainer {
+                // Every previous version got the DESIGN wrong, which is why no
+                // amount of animation tuning fixed it. Apple's HIG for disclosure
+                // controls (which uses "Advanced Options" as its own example) is
+                // explicit: the glyph never changes identity, only DIRECTION.
+                // Swapping slider.horizontal.3 → chevron.up changed what the icon
+                // *meant*, and since the two glyphs have different widths, the
+                // label reflowed — that's the jump, baked into the design.
+                //
+                // A single chevron, rotated. Mirror-image states, so the width is
+                // constant by construction and there is no glyph swap to pop. It's
+                // also interruptible mid-flight, which a content transition isn't.
+                // This is what NSButton's own disclosure bezel does.
+                //
+                // And it's .buttonStyle(.glass) — the real one — not a hand-rolled
+                // Button + .glassEffect. That brings the system's interactive
+                // press response and correct appearance in every light/dark and
+                // focus state, which is precisely the matrix I kept losing to.
                 Button {
                     camera.holdPreviewDuringAnimation()
-                    if settings.showAdvanced {
-                        // Swap the block for its own ghost in one frame, then
-                        // melt the ghost AND drive the scroll home in the same
-                        // transaction. Left to clamping, the offset only moves
-                        // when the shrinking content forces it — indirect and
-                        // lumpy. On the same spring, offset and max-offset
-                        // follow the same curve, so it never clamps.
-                        foldSpacer = advancedHeight
-                        settings.showAdvanced = false
-                        Task { @MainActor in
-                            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                                foldSpacer = 0
-                                scrollPos.scrollTo(edge: .top)
-                            }
+                    // Animate the STATE, in one transaction, so the siblings
+                    // reflow with the chevron instead of snapping after it.
+                    withAnimation(.snappy(duration: 0.32)) {
+                        if settings.showAdvanced {
+                            // Swap the block for a spacer of its exact height in
+                            // the same frame (net layout change: zero), then melt
+                            // the spacer and drive the scroll home on this same
+                            // curve — the offset never falls out of range, so it
+                            // never clamps.
+                            foldSpacer = advancedHeight
+                            settings.showAdvanced = false
+                            scrollPos.scrollTo(edge: .top)
+                        } else {
+                            foldSpacer = 0
+                            settings.showAdvanced = true
                         }
-                    } else {
-                        foldSpacer = 0
-                        settings.showAdvanced = true
+                    }
+                    if !settings.showAdvanced {
+                        Task { @MainActor in
+                            withAnimation(.snappy(duration: 0.32)) { foldSpacer = 0 }
+                        }
                     }
                 } label: {
-                    Label("Advanced", systemImage: settings.showAdvanced
-                          ? "chevron.up" : "slider.horizontal.3")
-                        .font(.system(size: 12, weight: .medium))
+                    HStack(spacing: 6) {
+                        Text("Advanced")
+                        Image(systemName: "chevron.down")
+                            .imageScale(.small)
+                            .rotationEffect(.degrees(settings.showAdvanced ? 180 : 0))
+                    }
+                    .font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .glassEffect(.regular, in: .capsule)
-                }
+                .buttonStyle(.glass)
+                .glassEffectID("advanced-toggle", in: glass)
 
                 // Collapse without the snap, in a way glass actually permits.
                 //

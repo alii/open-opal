@@ -40,3 +40,16 @@ __pycache__/
 
 # ---- macOS ----
 .DS_Store
+
+# ---- Signing ----
+# Provisioning profiles are account-specific (they embed the team ID, App IDs
+# and certificate) and get regenerated whenever capabilities change. Anyone
+# forking this needs to mint their own — see docs/SIGNING.md.
+Provisioning/
+
+# The Developer ID private key lives in ~/Library/Application Support/OpenOpal
+# and must never be near the repo. Belt and braces:
+*.key
+*.csr
+*.cer
+*.p12

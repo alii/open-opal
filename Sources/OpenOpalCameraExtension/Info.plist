@@ -5,36 +5,27 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Open Opal</string>
+	<string>Open Opal Camera</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Open Opal</string>
+	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
-	<string>APPL</string>
+	<string>SYSX</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.video</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>26.0</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Open Opal needs access to your Opal C1 camera.</string>
-	<key>NSHumanReadableCopyright</key>
-	<string>Open source. Not affiliated with Opal Camera Inc.</string>
-	<key>NSSupportsAutomaticTermination</key>
-	<false/>
-	<key>NSSupportsSuddenTermination</key>
-	<false/>
+	<key>CMIOExtension</key>
+	<dict>
+		<key>CMIOExtensionMachServiceName</key>
+		<string>group.sh.alistair.open-opal.camera</string>
+	</dict>
 	<key>NSSystemExtensionUsageDescription</key>
-	<string>Open Opal installs a virtual camera so other apps can use your processed video.</string>
+	<string>Provides the Open Opal virtual camera that other apps can use.</string>
 </dict>
 </plist>

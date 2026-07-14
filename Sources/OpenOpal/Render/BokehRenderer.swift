@@ -444,6 +444,56 @@ final class BokehRenderer: @unchecked Sendable {
         }
     }
 
+    // MARK: - Virtual camera export
+
+    private var exportPool: CVPixelBufferPool?
+    private var exportSize = (w: 0, h: 0)
+
+    /// Copies a rendered BGRA frame into an IOSurface-backed pixel buffer for
+    /// the virtual camera's sink. Runs on the render worker. The GPU blit plus
+    /// wait costs well under a millisecond at 1080p — and the wait is required,
+    /// because the sink will wrap this buffer into a sample buffer immediately.
+    func exportFrame(_ texture: MTLTexture) -> CVPixelBuffer? {
+        if exportPool == nil || exportSize != (texture.width, texture.height) {
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: texture.width,
+                kCVPixelBufferHeightKey as String: texture.height,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+                kCVPixelBufferMetalCompatibilityKey as String: true,
+            ]
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(nil,
+                                    [kCVPixelBufferPoolMinimumBufferCountKey: 6] as CFDictionary,
+                                    attrs as CFDictionary, &pool)
+            exportPool = pool
+            exportSize = (texture.width, texture.height)
+        }
+        guard let exportPool else { return nil }
+
+        var pb: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(nil, exportPool, &pb)
+        guard let pb else { return nil }
+
+        var cvTex: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(nil, textureCache, pb, nil,
+                                                  .bgra8Unorm,
+                                                  texture.width, texture.height, 0, &cvTex)
+        guard let cvTex, let dst = CVMetalTextureGetTexture(cvTex),
+              let cmd = queue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder() else { return nil }
+
+        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: texture.width, height: texture.height, depth: 1),
+                  to: dst, destinationSlice: 0, destinationLevel: 0,
+                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        return pb
+    }
+
     // MARK: - Plumbing
 
     private func uniforms(_ s: RenderSettings, w: Int, h: Int) -> Uniforms {

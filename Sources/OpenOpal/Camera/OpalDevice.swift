@@ -108,6 +108,7 @@ final class OpalDevice {
     /// So: wait for it, don't fail on it.
     func connect(settings: CameraSettings) async {
         guard handle == nil else { return }
+        lastSettings = settings
 
         state = .searching
         bootLog.removeAll()
@@ -309,7 +310,31 @@ final class OpalDevice {
         }
     }
 
+    private var lastSettings: CameraSettings?
+    private var watchdogRebooting = false
+
+    /// Reboot the camera if the stream has gone quiet while we believe we're
+    /// live. Detects the silently-dead capture thread, USB power-downs, and
+    /// firmware hangs alike — anything that stops frames without an error path.
+    private func watchdog() {
+        guard state == .streaming, !watchdogRebooting else { return }
+        let last = sink.lastFrameAt
+        guard last > 0, CFAbsoluteTimeGetCurrent() - last > 3.0 else { return }
+
+        watchdogRebooting = true
+        log.warning("watchdog: no frames for 3s — rebooting the camera")
+        bootLog.append("[watch] stream stalled (no frames for 3 s) — rebooting camera")
+
+        Task { @MainActor in
+            defer { watchdogRebooting = false }
+            guard let settings = lastSettings else { return }
+            disconnect()
+            await connect(settings: settings)
+        }
+    }
+
     private func pollTelemetry() {
+        watchdog()
         guard let handle else { return }
         var t = OpalTelemetry()
         guard opal_get_telemetry(handle, &t) else { return }
@@ -338,6 +363,14 @@ private final class FrameSink: @unchecked Sendable {
     }
     private var _callback: ((CVPixelBuffer, Double) -> Void)?
 
+    /// When the last frame arrived, host clock. The watchdog compares this
+    /// against now: the capture thread dies SILENTLY when a USB read errors
+    /// (idle power-down is the classic trigger), and without a heartbeat the
+    /// app just shows the last frame forever.
+    var lastFrameAt: CFAbsoluteTime { lock.withLock { _lastFrameAt } }
+    private var _lastFrameAt: CFAbsoluteTime = 0
+    func stampFrame() { lock.withLock { _lastFrameAt = CFAbsoluteTimeGetCurrent() } }
+
     /// Copies the NV12 planes into an IOSurface-backed CVPixelBuffer. This is
     /// the *only* copy in the whole path: from here the data reaches Metal as
     /// two textures with no colour conversion, and can go on to the virtual
@@ -362,6 +395,7 @@ private final class FrameSink: @unchecked Sendable {
         }
         CVPixelBufferUnlockBaseAddress(pb, [])
 
+        stampFrame()
         callback?(pb, latencyMs)
     }
 
