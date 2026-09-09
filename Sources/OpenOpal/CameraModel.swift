@@ -67,6 +67,8 @@ final class CameraModel {
     /// moves. Re-sending on every analysis pass would flood the control queue and
     /// make auto-exposure visibly pump.
     private var lastMeteredRect: CGRect?
+    private var lastFocusArea: CGFloat?
+    private var focusCooldownUntil: Date?
 
     func start() async {
         if renderer == nil, let r = BokehRenderer() {
@@ -76,7 +78,10 @@ final class CameraModel {
                 r.matteProvider = MatteProvider(device: mtl)
             }
             r.onSubject = { [weak self] subject in
-                Task { @MainActor in self?.meter(on: subject) }
+                Task { @MainActor in
+                    self?.meter(on: subject)
+                    self?.focusOnSubject(subject)
+                }
             }
             renderer = r
         }
@@ -212,6 +217,43 @@ final class CameraModel {
         }
         lastMeteredRect = rect
         device.meterExposure(on: rect)
+    }
+
+    /// Refocus on the subject, following the strategy the camera's own vendor
+    /// firmware uses.
+    ///
+    /// The interesting part is what it does *not* do. Continuous AF re-decides
+    /// constantly and visibly hunts, so this is one-shot AUTO aimed at the face
+    /// box — and it only re-triggers when the face's *area* changes by more
+    /// than 40%, which is to say when you actually moved toward or away from
+    /// the lens. Someone walking past behind you does not shift your face box
+    /// enough to qualify, so the lens stays put. That hysteresis is why vendor
+    /// autofocus feels settled where continuous AF does not.
+    ///
+    /// The one-second cooldown mirrors the sleep the firmware takes after each
+    /// trigger, so refocuses cannot chain.
+    private func focusOnSubject(_ subject: SubjectInfo) {
+        guard settings.focusOnSubject, !settings.manualFocus, device.state.isLive else { return }
+        if let until = focusCooldownUntil, Date() < until { return }
+
+        // Same upper-middle crop as metering: that is where the face is, and a
+        // full-body box drags in torso and desk.
+        let b = subject.bounds
+        let face = CGRect(x: b.minX + b.width * 0.2,
+                          y: b.minY,
+                          width: b.width * 0.6,
+                          height: max(b.height * 0.45, 0.05))
+
+        let area = face.width * face.height
+        guard area > 0 else { return }
+
+        if let last = lastFocusArea, last > 0 {
+            guard abs(area / last - 1.0) > 0.4 else { return }
+        }
+
+        lastFocusArea = area
+        focusCooldownUntil = Date().addingTimeInterval(1)
+        device.focus(on: face)
     }
 
     /// Cold settings changed; reboot the pipeline to pick them up.
