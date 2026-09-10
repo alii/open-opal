@@ -793,6 +793,30 @@ void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float
     } catch(const std::exception& e) { setError(e.what()); }
 }
 
+void opal_set_af_region(OpalDeviceHandle* h, float x, float y, float w, float hh) {
+    if(!h || !h->controlQ) return;
+    try {
+        int rx, ry, rw, rh;
+        if(!sensorRect(h, x, y, w, hh, rx, ry, rw, rh)) return;
+
+        dai::CameraControl ctrl;
+        // Same one-shot strategy as a tap: CONTINUOUS would re-decide for
+        // itself and drift straight back off the subject.
+        ctrl.setAutoFocusMode(dai::CameraControl::AutoFocusMode::AUTO);
+        ctrl.setAutoFocusRegion(rx, ry, rw, rh);
+        ctrl.setAutoFocusTrigger();
+        h->controlQ->send(ctrl);
+
+        {
+            std::lock_guard<std::mutex> lk(h->ctrlMutex);
+            h->desired.manualFocus = false;
+            h->desired.afMode      = OPAL_AF_AUTO;
+            h->lastSent.manualFocus = false;
+            h->lastSent.afMode      = OPAL_AF_AUTO;
+        }
+    } catch(const std::exception& e) { setError(e.what()); }
+}
+
 void opal_set_exposure_region(OpalDeviceHandle* h, float x, float y, float w, float hh) {
     if(!h || !h->controlQ) return;
     try {

@@ -32,6 +32,7 @@ struct RenderSettings: Sendable {
     var uniformBlur: Bool
     var meterOnSubject: Bool
     var autoFocusSubject: Bool
+    var focusOnSubject: Bool
     var focusDistance: Double
     var aperture: Double
     var hexIris: Bool
@@ -44,6 +45,10 @@ struct RenderSettings: Sendable {
         uniformBlur = s.uniformBlur
         meterOnSubject = s.meterOnSubject
         autoFocusSubject = s.autoFocusSubject
+        // Focus tracking consumes the same subject analysis, so it has to be in
+        // the snapshot too — otherwise "Follow face" silently does nothing
+        // whenever bokeh and subject metering are both off.
+        focusOnSubject = s.focusOnSubject
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
@@ -270,7 +275,7 @@ final class BokehRenderer: @unchecked Sendable {
         // In sync mode the caller has already run analyzeNow() for this exact
         // frame, so there's nothing to kick off here.
         let syncing = settings.bokehEnabled && settings.syncBokeh
-        if !syncing && (settings.bokehEnabled || settings.meterOnSubject) {
+        if !syncing && (settings.bokehEnabled || settings.meterOnSubject || settings.focusOnSubject) {
             kickOffAnalysisIfIdle(pixelBuffer: pixelBuffer,
                                   needsDepth: settings.bokehEnabled && !settings.uniformBlur)
         }

@@ -174,6 +174,12 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c);
 void opal_trigger_autofocus(OpalDeviceHandle* h);
 // Normalized [0,1] rect within the frame; drives AE + AF metering region.
 void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float h_);
+
+// Focus only, leaving exposure metering where it is. An explicit tap means
+// "expose and focus here"; automatic subject tracking should not silently
+// re-aim metering the user may have deliberately pointed elsewhere, or turned
+// off entirely.
+void opal_set_af_region(OpalDeviceHandle* h, float x, float y, float w, float h_);
 // Auto-exposure metering region only (leaves focus alone). Used to meter on the
 // person rather than the whole frame — with a bright window behind you, a
 // full-frame average blows out the background and leaves your face in shadow.

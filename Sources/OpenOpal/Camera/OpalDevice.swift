@@ -327,11 +327,13 @@ final class OpalDevice {
     }
 
     /// Tap-to-focus: point the AF and AE metering at a spot in the frame.
-    /// Point AF (and AE) at an explicit box rather than a tapped point.
-    /// Used by subject tracking, where the face detector already knows the box.
+    /// Point AF at an explicit box, leaving exposure metering alone.
+    /// Used by subject tracking: a tap means "expose and focus here", but
+    /// automatic tracking should not silently re-aim metering the user may
+    /// have pointed elsewhere or switched off.
     func focus(on rect: CGRect) {
         guard let handle else { return }
-        opal_set_focus_region(handle,
+        opal_set_af_region(handle,
                               Float(max(0, min(1, rect.minX))),
                               Float(max(0, min(1, rect.minY))),
                               Float(max(0.02, min(1, rect.width))),
