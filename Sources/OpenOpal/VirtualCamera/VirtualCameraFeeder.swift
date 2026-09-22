@@ -19,7 +19,9 @@ final class VirtualCameraFeeder: @unchecked Sendable {
     private var sinkStreamID: CMIOStreamID = 0
     private var queue: CMSimpleQueue?
     private var formatDesc: CMFormatDescription?
-    private(set) var connected = false
+    private var isConnected = false
+    var connected: Bool { lock.withLock { isConnected } }
+    private let converter = VirtualCameraFrameConverter()
 
     /// Frames delivered / dropped, for the UI.
     private(set) var sent: Int = 0
@@ -32,7 +34,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
     /// (extension not installed / still activating).
     func connectIfNeeded() {
         lock.lock(); defer { lock.unlock() }
-        guard !connected else { return }
+        guard !isConnected else { return }
 
         guard let device = findDevice(uid: kVirtualDeviceUID) else { return }
         guard let sink = findSinkStream(device: device) else {
@@ -55,16 +57,16 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         deviceID = device
         sinkStreamID = sink
         queue = q.takeRetainedValue()
-        connected = true
+        isConnected = true
         log.info("feeding virtual camera (device \(device), sink \(sink))")
     }
 
     func disconnect() {
         lock.lock(); defer { lock.unlock() }
-        if connected {
+        if isConnected {
             CMIODeviceStopStream(deviceID, sinkStreamID)
         }
-        connected = false
+        isConnected = false
         queue = nil
         formatDesc = nil
     }
@@ -74,11 +76,15 @@ final class VirtualCameraFeeder: @unchecked Sendable {
     /// Enqueue one BGRA frame. Called from the render worker, off the main actor.
     func send(_ pixelBuffer: CVPixelBuffer) {
         lock.lock(); defer { lock.unlock() }
-        guard connected, let queue else { return }
+        guard isConnected, let queue else { return }
 
         // The sink's queue is shallow by design; if the extension isn't
         // draining (no app watching the camera), drop rather than block.
         guard CMSimpleQueueGetCount(queue) < CMSimpleQueueGetCapacity(queue) else {
+            dropped += 1
+            return
+        }
+        guard let pixelBuffer = converter.convert(pixelBuffer) else {
             dropped += 1
             return
         }
@@ -107,9 +113,14 @@ final class VirtualCameraFeeder: @unchecked Sendable {
             sampleBufferOut: &sbuf)
         guard status == noErr, let sbuf else { return }
 
-        // The queue takes ownership of a retained reference.
-        CMSimpleQueueEnqueue(queue, element: Unmanaged.passRetained(sbuf).toOpaque())
-        sent += 1
+        // Transfer ownership only if the queue actually accepts the buffer.
+        let retained = Unmanaged.passRetained(sbuf)
+        if CMSimpleQueueEnqueue(queue, element: retained.toOpaque()) == noErr {
+            sent += 1
+        } else {
+            retained.release()
+            dropped += 1
+        }
     }
 
     // MARK: - CMIO plumbing

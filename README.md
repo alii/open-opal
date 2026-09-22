@@ -128,6 +128,10 @@ Camera"** to every app on the Mac — Zoom, Meet, FaceTime, anything. It carries
 the processed image, blur and all. When the app isn't running it shows a placard
 rather than a frozen frame.
 
+Virtual-camera output is always 1920×1080 BGRA, matching the extension's
+advertised format. Other input sizes are scaled to fit with black bars rather
+than stretched; native 1080p BGRA frames pass through without an extra copy.
+
 Installing it requires a signed and notarized build; see
 [docs/SIGNING.md](docs/SIGNING.md). The app itself runs fine unsigned.
 
