@@ -35,6 +35,13 @@ static void expectRange(const dai::RawCameraControl& command, int lo, int hi) {
             "wrong serialized autofocus range");
 }
 
+static void expectNoRange(const dai::RawCameraControl& command) {
+    require((command.cmdMask & bit(Command::AF_LENS_RANGE)) == 0,
+            "unlimited autofocus overrode the camera's tuned range");
+}
+
+// With a limit, a mode command carries the range. Without one it carries no
+// range, leaving the camera's own tuned range in charge.
 static void expectModeAndRange(const OpalControls& current, const OpalControls& previous,
                                bool havePrevious, int lo, int hi) {
     dai::CameraControl ctrl;
@@ -43,9 +50,11 @@ static void expectModeAndRange(const OpalControls& current, const OpalControls& 
     require((command.cmdMask & bit(Command::AF_MODE)) != 0, "missing serialized autofocus mode");
     require(command.autoFocusMode == mapAf(current.afMode), "wrong serialized autofocus mode");
     require((command.cmdMask & bit(Command::MOVE_LENS)) == 0, "autofocus sent manual lens command");
-    expectRange(command, lo, hi);
+    const uint64_t rangeBit = current.limitAfRange ? bit(Command::AF_LENS_RANGE) : 0;
+    if(current.limitAfRange) expectRange(command, lo, hi);
+    else expectNoRange(command);
     if(havePrevious) {
-        require(command.cmdMask == (bit(Command::AF_MODE) | bit(Command::AF_LENS_RANGE)),
+        require(command.cmdMask == (bit(Command::AF_MODE) | rangeBit),
                 "focus-only transition serialized unrelated commands");
     }
 }
@@ -102,12 +111,14 @@ int main() {
             region.setAutoFocusRegion(100, 200, 300, 400);
             region.setAutoFocusTrigger();
             const auto regionCommand = wire(region);
-            require(regionCommand.cmdMask == (bit(Command::AF_MODE) | bit(Command::AF_LENS_RANGE) |
+            require(regionCommand.cmdMask == (bit(Command::AF_MODE) |
+                                               (limited ? bit(Command::AF_LENS_RANGE) : 0) |
                                                bit(Command::AF_REGION) | bit(Command::AF_TRIGGER)),
                     "one-shot focus commands were not serialized together");
             require(regionCommand.autoFocusMode == dai::CameraControl::AutoFocusMode::AUTO,
                     "one-shot region is not AUTO");
-            expectRange(regionCommand, lo, hi);
+            if(limited) expectRange(regionCommand, lo, hi);
+            else expectNoRange(regionCommand);
 
             auto manualPosition = manual;
             manualPosition.lensPosition = 140;

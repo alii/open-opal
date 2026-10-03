@@ -643,8 +643,8 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c) {
     h->desiredValid = true;
 }
 
-// Every autofocus mode command resets the search, including one-shot regions.
-// Keep the mode and its range together so no caller can drop the configured limit.
+// The lens range sent with a mode or a limit change. Unlimited means 0..255,
+// which is only for clearing a limit: see setAfMode.
 static void setAfRange(const OpalControls& c, dai::CameraControl& ctrl) {
     int lo = c.limitAfRange ? std::clamp(c.afRangeInfinity, 0, 255) : 0;
     int hi = c.limitAfRange ? std::clamp(c.afRangeMacro, 0, 255) : 255;
@@ -652,10 +652,14 @@ static void setAfRange(const OpalControls& c, dai::CameraControl& ctrl) {
     ctrl.setAutoFocusLensRange(lo, hi);
 }
 
+// Every autofocus mode command resets the search, including one-shot regions.
+// Keep the mode and a configured limit together so no caller can drop it.
+// Without a limit, send no range at all: 0..255 overrides the camera's own
+// tuned range, and autofocus then lands visibly soft.
 static void setAfMode(const OpalControls& c, dai::CameraControl::AutoFocusMode mode,
                       dai::CameraControl& ctrl) {
     ctrl.setAutoFocusMode(mode);
-    setAfRange(c, ctrl);
+    if(c.limitAfRange) setAfRange(c, ctrl);
 }
 
 // Builds a CameraControl containing ONLY what changed since the last send.
