@@ -19,6 +19,14 @@ camera directly over USB.
 - 4K / 1080p / 720p, up to 42 fps
 - Background blur, rendered in Metal with Apple's Vision segmentation
 - Optional exposure metering on your face instead of the whole frame
+- Menu bar controls with a live preview and an icon-aligned pointer
+- Drag the header to float and resize; drop near the menu bar icon to dock
+
+The app starts in the menu bar without a Dock icon or a separate main window.
+Click the camera-aperture icon to open the controls. The header button also
+switches between docked and floating controls. Clicking away or pressing Escape
+hides the panel without disconnecting the camera. Click the icon to reopen it.
+Quit ends the camera session.
 
 Frames are downscaled on the camera's own ISP before crossing USB, which keeps
 glass-to-screen latency around 45 ms at 1080p30. The toolbar shows the live

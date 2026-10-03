@@ -2,48 +2,33 @@ import SwiftUI
 
 @main
 struct OpenOpalApp: App {
-    @State private var camera = CameraModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        // A primary Window quits on close; WindowGroup keeps the camera alive
-        // when the controls are dismissed during a call.
-        WindowGroup("Open Opal", id: "main") {
-            ContentView()
-                .environment(camera)
-                .frame(minWidth: 940, minHeight: 620)
-                .task { await camera.start() }
-                // Closing the controls must not interrupt a video call. Quit
-                // OpenOpal to release the camera; hiding its window is safe.
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                    camera.autoLaunch.refresh()
-                }
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentMinSize)
-        .commands {
-            CommandGroup(replacing: .newItem) {}
-            CommandMenu("Camera") {
-                Button("Reconnect") {
-                    Task { await camera.reconnect() }
-                }
-                .keyboardShortcut("r")
+        Settings { EmptyView() }
+    }
+}
 
-                Button("Trigger Autofocus") { camera.device.triggerAutofocus() }
-                    .keyboardShortcut("f")
-                    .disabled(!camera.device.state.isLive)
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let camera = CameraModel()
+    private let controls = MenuBarPanelController()
 
-                Divider()
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        controls.install(
+            content: NSHostingController(
+                rootView:
+                    MenuBarFlyout(controller: controls).environment(camera)))
+        // An accessory app rarely becomes active, so refresh when shown instead.
+        controls.onShow = { [camera] in camera.autoLaunch.refresh() }
+        Task { await camera.start() }
+    }
 
-                Button("Reset All Settings") { camera.settings.reset(); camera.push() }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-                Button("Toggle Advanced Settings") { camera.settings.showAdvanced.toggle() }
-                    .keyboardShortcut("a", modifiers: [.command, .shift])
-
-                Button(camera.previewFrozen ? "Unfreeze Preview" : "Freeze Preview") {
-                    camera.previewFrozen.toggle()
-                }
-                .keyboardShortcut("f", modifiers: [.command, .shift])
-            }
-        }
+    func applicationWillTerminate(_ notification: Notification) {
+        controls.shutdown()
+        camera.stop()
     }
 }

@@ -26,6 +26,8 @@
 	<string>public.app-category.video</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Open Opal needs access to your Opal C1 camera.</string>
 	<key>NSHumanReadableCopyright</key>

@@ -219,25 +219,10 @@ struct Inspector: View {
                        value: settings.bokehEnabled)
         }
         .scrollIndicators(.never)
-        // Only scroll (and only bounce) once the content genuinely overflows —
-        // i.e. when Advanced is open.
         .scrollBounceBehavior(.basedOnSize)
-        // The scroll region runs edge-to-edge — all the way to the window's top
-        // and bottom — and the CONTENT carries the inset instead. So at rest the
-        // panel sits exactly where it used to, but scrolled content travels to
-        // the real window edge before it clips. A window edge is a legitimate
-        // boundary; the old floating viewport sliced rows mid-air at an
-        // arbitrary line, which is what read as broken. No fades needed — this
-        // is how every native macOS sidebar behaves.
-        .contentMargins(.top, 62, for: .scrollContent)
+        .contentMargins(.top, 12, for: .scrollContent)
         .contentMargins(.bottom, 18, for: .scrollContent)
         .scrollPosition($scrollPos)
-        // The glass slabs cast a soft shadow that reaches past the scroll
-        // viewport's width, and the default clip cut it off in a dead-straight
-        // vertical line over the video. The clip isn't protecting anything —
-        // vertically the scroll region already ends at the window edges, which
-        // clip for free — so let the shadows fall where they naturally would.
-        .scrollClipDisabled()
         .frame(maxHeight: .infinity, alignment: .top)
     }
 

@@ -49,6 +49,7 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "26.0"
+        LSUIElement: true
         NSHumanReadableCopyright: "Open source. Not affiliated with Opal Camera Inc."
         # We drive the C1 over raw USB rather than as a capture device, so we
         # don't need NSCameraUsageDescription for the camera itself — but the
