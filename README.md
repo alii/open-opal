@@ -48,8 +48,10 @@ returning to automatic focus can refocus even if the person's size has not chang
 
 ## Building
 
-Needs an Apple silicon Mac on macOS 26 or later, Xcode 26, and
-`brew install cmake ninja xcodegen`.
+Open Opal runs on Apple silicon Macs with macOS 14 (Sonoma) or later. Liquid
+Glass appears on macOS 26 and later; older versions get the classic look.
+
+Building needs macOS 27, Xcode 27, and `brew install cmake ninja xcodegen`.
 
 ```sh
 ./scripts/bootstrap.sh     # fetches and builds depthai-core

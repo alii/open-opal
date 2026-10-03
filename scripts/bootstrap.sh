@@ -63,9 +63,14 @@ echo "==> configuring (Hunter builds deps from source; first run takes a few min
 # nested cmake invocations still declare. The env var propagates into those
 # nested calls; a -D flag on the outer command does not.
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
+# Pin the minimum macOS. Without it every library targets the OS that built it,
+# so a build on a newer Mac won't load on older ones. The env var reaches
+# Hunter's nested dependency builds too; keep it in step with project.yml.
+export MACOSX_DEPLOYMENT_TARGET=14.0
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=ON \
   -DDEPTHAI_BUILD_EXAMPLES=OFF \
