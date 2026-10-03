@@ -151,11 +151,30 @@ for distance-based falloff.
 
 Open Opal installs a CoreMediaIO system extension that publishes **"Open Opal
 Camera"** to every app on the Mac — Zoom, Meet, FaceTime, anything. It carries
-the processed image, blur and all. When the app isn't running it shows a placard
-rather than a frozen frame.
+the processed image, blur and all. When the app isn't running it shows a camera-off
+symbol. The fallback contains no text, so it stays understandable in mirrored
+self-views and in the normal video other participants receive.
+
+Virtual-camera output is always 1920×1080 BGRA, matching the extension's
+advertised format. Other input sizes are scaled to fit with black bars rather
+than stretched; native 1080p BGRA frames pass through without an extra copy.
+The feeder uses the device's output scope and playback stream. The capture
+stream serves camera clients and is not a queue for sending our frames.
 
 Installing it requires a signed and notarized build; see
 [docs/SIGNING.md](docs/SIGNING.md). The app itself runs fine unsigned.
+
+Enable **Start OpenOpal automatically** in the Virtual Camera section to launch
+OpenOpal when a video app starts using **Open Opal Camera**. A small login helper
+listens for capture requests; it does not open the camera or process video.
+If macOS requests approval, allow OpenOpal Launcher in **System Settings →
+General → Login Items & Extensions**. Disable the same toggle to remove the helper.
+
+OpenOpal opens without taking focus from your meeting. Closing its controls
+window leaves the camera running; quit OpenOpal to release it. Deliberately
+quitting during a call will not immediately relaunch it: turn the meeting's
+camera off and on, or reopen OpenOpal, to start again. The camera still needs a
+few seconds to boot when OpenOpal launches.
 
 ## Status
 

@@ -1,9 +1,8 @@
 // The frame shown when nothing is feeding the camera: a quiet card instead of
-// a frozen last frame or black. Rendered once with CoreGraphics/CoreText (no
+// a frozen last frame or black. Rendered once with CoreGraphics (no
 // AppKit in a system extension) and re-timestamped 30 times a second.
 
 import CoreGraphics
-import CoreText
 import CoreVideo
 import Foundation
 
@@ -39,7 +38,7 @@ enum SplashCard {
                                start: CGPoint(x: w / 2, y: h),
                                end: CGPoint(x: w / 2, y: 0), options: [])
 
-        // Soft glow behind the wordmark.
+        // Soft glow behind the camera-off symbol.
         let glow = CGGradient(colorsSpace: nil,
                               colors: [CGColor(red: 1.0, green: 0.72, blue: 0.58, alpha: 0.22),
                                        CGColor(red: 1.0, green: 0.72, blue: 0.58, alpha: 0.0)] as CFArray,
@@ -49,23 +48,52 @@ enum SplashCard {
                                endCenter: CGPoint(x: w / 2, y: h / 2), endRadius: h * 0.55,
                                options: [])
 
-        func draw(_ text: String, size: CGFloat, weight: CFString, y: CGFloat, alpha: CGFloat) {
-            let font = CTFontCreateWithName(weight, size, nil)
-            let attr = [
-                kCTFontAttributeName: font,
-                kCTForegroundColorAttributeName: CGColor(gray: 1.0, alpha: alpha),
-            ] as CFDictionary
-            let line = CTLineCreateWithAttributedString(
-                CFAttributedStringCreate(nil, text as CFString, attr))
-            let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
-            ctx.textPosition = CGPoint(x: (w - bounds.width) / 2, y: y)
-            CTLineDraw(line, ctx)
-        }
+        // Meeting apps often mirror only their local preview. A pictogram
+        // makes sense in both orientations; baked-in text cannot do that.
+        ctx.saveGState()
+        ctx.translateBy(x: w / 2, y: h / 2)
+        let scale = min(w, h) / 1080
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.72))
+        ctx.setLineWidth(6)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
 
-        draw("Open Opal", size: 64, weight: "HelveticaNeue-Medium" as CFString,
-             y: h / 2 - 10, alpha: 0.92)
-        draw("Launch the app to start the camera", size: 26,
-             weight: "HelveticaNeue" as CFString, y: h / 2 - 64, alpha: 0.55)
+        let camera = CGMutablePath()
+        camera.move(to: CGPoint(x: -64, y: -44))
+        camera.addLine(to: CGPoint(x: 64, y: -44))
+        camera.addQuadCurve(to: CGPoint(x: 78, y: -30), control: CGPoint(x: 78, y: -44))
+        camera.addLine(to: CGPoint(x: 78, y: 32))
+        camera.addQuadCurve(to: CGPoint(x: 64, y: 46), control: CGPoint(x: 78, y: 46))
+        camera.addLine(to: CGPoint(x: 34, y: 46))
+        camera.addLine(to: CGPoint(x: 22, y: 60))
+        camera.addLine(to: CGPoint(x: -22, y: 60))
+        camera.addLine(to: CGPoint(x: -34, y: 46))
+        camera.addLine(to: CGPoint(x: -64, y: 46))
+        camera.addQuadCurve(to: CGPoint(x: -78, y: 32), control: CGPoint(x: -78, y: 46))
+        camera.addLine(to: CGPoint(x: -78, y: -30))
+        camera.addQuadCurve(to: CGPoint(x: -64, y: -44), control: CGPoint(x: -78, y: -44))
+        camera.closeSubpath()
+        ctx.addPath(camera)
+        ctx.strokePath()
+        ctx.strokeEllipse(in: CGRect(x: -22, y: -22, width: 44, height: 44))
+
+        let slash = CGMutablePath()
+        slash.move(to: CGPoint(x: -84, y: 70))
+        slash.addLine(to: CGPoint(x: 84, y: -68))
+        // Clear a small gap underneath the slash within this layer, keeping
+        // the existing gradient intact rather than painting over it.
+        ctx.setBlendMode(.clear)
+        ctx.setLineWidth(18)
+        ctx.addPath(slash)
+        ctx.strokePath()
+        ctx.setBlendMode(.normal)
+        ctx.setLineWidth(6)
+        ctx.addPath(slash)
+        ctx.strokePath()
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
 
         return pb
     }

@@ -5,12 +5,18 @@ struct OpenOpalApp: App {
     @State private var camera = CameraModel()
 
     var body: some Scene {
-        Window("Open Opal", id: "main") {
+        // A primary Window quits on close; WindowGroup keeps the camera alive
+        // when the controls are dismissed during a call.
+        WindowGroup("Open Opal", id: "main") {
             ContentView()
                 .environment(camera)
                 .frame(minWidth: 940, minHeight: 620)
                 .task { await camera.start() }
-                .onDisappear { camera.stop() }
+                // Closing the controls must not interrupt a video call. Quit
+                // OpenOpal to release the camera; hiding its window is safe.
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    camera.autoLaunch.refresh()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
