@@ -44,7 +44,7 @@ set_target_properties(OpalBridge PROPERTIES
 option(OPAL_BRIDGE_TEST "Build the bridge tests" OFF)
 if(OPAL_BRIDGE_TEST)
     add_executable(bridge_test test/bridge_test.c)
-    add_executable(region_test "${CMAKE_CURRENT_LIST_DIR}/../../tools/probes/region_test.c")
+    add_executable(region_test ${CMAKE_CURRENT_LIST_DIR}/../../tools/probes/region_test.c)
     target_link_libraries(region_test PRIVATE OpalBridge)
     set_target_properties(region_test PROPERTIES INSTALL_RPATH "@executable_path;${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib" BUILD_WITH_INSTALL_RPATH TRUE)
     target_link_libraries(bridge_test PRIVATE OpalBridge)
