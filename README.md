@@ -129,6 +129,12 @@ the processed image, blur and all. When the app isn't running it shows a camera-
 symbol. The fallback contains no text, so it stays understandable in mirrored
 self-views and in the normal video other participants receive.
 
+Virtual-camera output is always 1920×1080 BGRA, matching the extension's
+advertised format. Other input sizes are scaled to fit with black bars rather
+than stretched; native 1080p BGRA frames pass through without an extra copy.
+The feeder uses the device's output scope and playback stream. The capture
+stream serves camera clients and is not a queue for sending our frames.
+
 Installing it requires a signed and notarized build; see
 [docs/SIGNING.md](docs/SIGNING.md). The app itself runs fine unsigned.
 
