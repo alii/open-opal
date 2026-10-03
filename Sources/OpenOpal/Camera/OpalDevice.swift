@@ -270,6 +270,9 @@ final class OpalDevice {
 
         c.manualFocus  = s.manualFocus
         c.lensPosition = Int32(s.lensPosition)
+        c.limitAfRange     = s.limitAfRange
+        c.afRangeInfinity  = Int32(s.afRangeInfinity)
+        c.afRangeMacro     = Int32(s.afRangeMacro)
         c.afMode = switch s.afMode {
         case .auto:            OPAL_AF_AUTO
         case .continuousVideo: OPAL_AF_CONTINUOUS_VIDEO
@@ -324,6 +327,19 @@ final class OpalDevice {
     }
 
     /// Tap-to-focus: point the AF and AE metering at a spot in the frame.
+    /// Point AF at an explicit box, leaving exposure metering alone.
+    /// Used by subject tracking: a tap means "expose and focus here", but
+    /// automatic tracking should not silently re-aim metering the user may
+    /// have pointed elsewhere or switched off.
+    func focus(on rect: CGRect) {
+        guard let handle else { return }
+        opal_set_af_region(handle,
+                              Float(max(0, min(1, rect.minX))),
+                              Float(max(0, min(1, rect.minY))),
+                              Float(max(0.02, min(1, rect.width))),
+                              Float(max(0.02, min(1, rect.height))))
+    }
+
     func focus(at point: CGPoint, boxSize: CGFloat = 0.18) {
         guard let handle else { return }
         let half = boxSize / 2

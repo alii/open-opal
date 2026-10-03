@@ -643,6 +643,21 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c) {
     h->desiredValid = true;
 }
 
+// Every autofocus mode command resets the search, including one-shot regions.
+// Keep the mode and its range together so no caller can drop the configured limit.
+static void setAfRange(const OpalControls& c, dai::CameraControl& ctrl) {
+    int lo = c.limitAfRange ? std::clamp(c.afRangeInfinity, 0, 255) : 0;
+    int hi = c.limitAfRange ? std::clamp(c.afRangeMacro, 0, 255) : 255;
+    if(lo > hi) std::swap(lo, hi);
+    ctrl.setAutoFocusLensRange(lo, hi);
+}
+
+static void setAfMode(const OpalControls& c, dai::CameraControl::AutoFocusMode mode,
+                      dai::CameraControl& ctrl) {
+    ctrl.setAutoFocusMode(mode);
+    setAfRange(c, ctrl);
+}
+
 // Builds a CameraControl containing ONLY what changed since the last send.
 // Returns false if nothing did, so we skip the send entirely.
 static bool buildDelta(const OpalControls& c, const OpalControls& prev, bool havePrev,
@@ -669,14 +684,26 @@ static bool buildDelta(const OpalControls& c, const OpalControls& prev, bool hav
     // --- focus ---
     // Guarded tightly: re-issuing setAutoFocusMode makes the lens restart its
     // search, so it must be sent ONLY when the mode genuinely changes.
-    if(all || c.manualFocus != prev.manualFocus ||
-       (c.manualFocus && c.lensPosition != prev.lensPosition) ||
-       (!c.manualFocus && c.afMode != prev.afMode)) {
+    const bool afModeChanged = !c.manualFocus &&
+        (all || prev.manualFocus || c.afMode != prev.afMode);
+    if(afModeChanged || (c.manualFocus &&
+       (all || !prev.manualFocus || c.lensPosition != prev.lensPosition))) {
         if(c.manualFocus) {
             ctrl.setManualFocus(std::clamp(c.lensPosition, 0, 255));
         } else {
-            ctrl.setAutoFocusMode(mapAf(c.afMode));
+            setAfMode(c, mapAf(c.afMode), ctrl);
         }
+        any = true;
+    }
+
+    // --- autofocus lens range ---
+    // Mode changes already restore the range above. Range-only updates must
+    // not resend the mode and restart autofocus.
+    if(!c.manualFocus && !afModeChanged &&
+       (c.limitAfRange != prev.limitAfRange ||
+        (c.limitAfRange && (c.afRangeInfinity != prev.afRangeInfinity ||
+                            c.afRangeMacro    != prev.afRangeMacro)))) {
+        setAfRange(c, ctrl);
         any = true;
     }
 
@@ -753,7 +780,10 @@ void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float
         // One-shot AF. In CONTINUOUS mode the lens keeps re-deciding for itself,
         // so even a successful click-to-focus would drift straight back off you.
         // AUTO + trigger means: scan once, on this region, then hold.
-        ctrl.setAutoFocusMode(dai::CameraControl::AutoFocusMode::AUTO);
+        {
+            std::lock_guard<std::mutex> lk(h->ctrlMutex);
+            setAfMode(h->desired, dai::CameraControl::AutoFocusMode::AUTO, ctrl);
+        }
         ctrl.setAutoFocusRegion(rx, ry, rw, rh);
         ctrl.setAutoExposureRegion(rx, ry, rw, rh);
         // Setting the region alone only tells the lens where to look NEXT time it
@@ -764,6 +794,33 @@ void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float
 
         // Keep the coalescing thread in step, or its next delta would "helpfully"
         // re-send CONTINUOUS and undo the lock we just took.
+        {
+            std::lock_guard<std::mutex> lk(h->ctrlMutex);
+            h->desired.manualFocus = false;
+            h->desired.afMode      = OPAL_AF_AUTO;
+            h->lastSent.manualFocus = false;
+            h->lastSent.afMode      = OPAL_AF_AUTO;
+        }
+    } catch(const std::exception& e) { setError(e.what()); }
+}
+
+void opal_set_af_region(OpalDeviceHandle* h, float x, float y, float w, float hh) {
+    if(!h || !h->controlQ) return;
+    try {
+        int rx, ry, rw, rh;
+        if(!sensorRect(h, x, y, w, hh, rx, ry, rw, rh)) return;
+
+        dai::CameraControl ctrl;
+        // Same one-shot strategy as a tap: CONTINUOUS would re-decide for
+        // itself and drift straight back off the subject.
+        {
+            std::lock_guard<std::mutex> lk(h->ctrlMutex);
+            setAfMode(h->desired, dai::CameraControl::AutoFocusMode::AUTO, ctrl);
+        }
+        ctrl.setAutoFocusRegion(rx, ry, rw, rh);
+        ctrl.setAutoFocusTrigger();
+        h->controlQ->send(ctrl);
+
         {
             std::lock_guard<std::mutex> lk(h->ctrlMutex);
             h->desired.manualFocus = false;

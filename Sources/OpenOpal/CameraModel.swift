@@ -69,6 +69,8 @@ final class CameraModel {
     /// moves. Re-sending on every analysis pass would flood the control queue and
     /// make auto-exposure visibly pump.
     private var lastMeteredRect: CGRect?
+    private var lastFocusArea: CGFloat?
+    private var focusCooldownUntil: Date?
 
     func start() async {
         // A launch request can reopen the window while a previous window task
@@ -84,7 +86,10 @@ final class CameraModel {
                 r.matteProvider = MatteProvider(device: mtl)
             }
             r.onSubject = { [weak self] subject in
-                Task { @MainActor in self?.meter(on: subject) }
+                Task { @MainActor in
+                    self?.meter(on: subject)
+                    self?.focusOnSubject(subject)
+                }
             }
             renderer = r
         }
@@ -161,6 +166,7 @@ final class CameraModel {
 
     func reconnect() async {
         guard !isStarting, !isRebooting else { return }
+        resetFocusTracking()
         isRebooting = true
         defer { isRebooting = false }
         device.disconnect()
@@ -169,7 +175,12 @@ final class CameraModel {
 
     /// Send hot settings to the camera. Cheap — safe to call on every slider tick.
     /// The bridge coalesces and diffs, so nothing here blocks on USB.
-    func push() { device.apply(settings) }
+    func push() {
+        // Clear immediately, even if manual focus is turned off again before
+        // the next subject analysis arrives.
+        if settings.manualFocus { resetFocusTracking() }
+        device.apply(settings)
+    }
 
     /// Bring the renderer in line with the settings: mask quality, and whether the
     /// depth model needs to exist at all.
@@ -221,6 +232,79 @@ final class CameraModel {
         }
         lastMeteredRect = rect
         device.meterExposure(on: rect)
+    }
+
+    /// Refocus on the subject, following the strategy the camera's own vendor
+    /// firmware uses.
+    ///
+    /// The interesting part is what it does *not* do. Continuous AF re-decides
+    /// constantly and visibly hunts, so this is one-shot AUTO aimed at the face
+    /// box — and it only re-triggers when the face's *area* changes by more
+    /// than 40%, which is to say when you actually moved toward or away from
+    /// the lens. Someone walking past behind you does not shift your face box
+    /// enough to qualify, so the lens stays put. That hysteresis is why vendor
+    /// autofocus feels settled where continuous AF does not.
+    ///
+    /// The one-second cooldown mirrors the sleep the firmware takes after each
+    /// trigger, so refocuses cannot chain.
+    private func focusOnSubject(_ subject: SubjectInfo) {
+        guard settings.focusOnSubject, device.state.isLive else { return }
+
+        // While the lens is being driven by hand, drop the history: otherwise
+        // handing it back to autofocus with the subject unchanged compares
+        // against a stale area and skips the first trigger.
+        guard !settings.manualFocus else {
+            resetFocusTracking()
+            return
+        }
+        if let until = focusCooldownUntil, Date() < until { return }
+
+        // Caveat worth stating plainly: `bounds` is the segmentation's person
+        // box, not a face box. The upper-middle crop below is a stand-in for
+        // where a face sits within a person, which holds for one person facing
+        // the camera and degrades otherwise — a raised arm can grow the box,
+        // and with two people the crop can land between them.
+        //
+        // The vendor firmware runs a real face detector and applies the
+        // hysteresis to an actual face. Doing the same here needs Vision face
+        // detection wired into the analysis pass; until then, coverage is
+        // checked so a tiny or fragmented mask cannot drive the lens.
+        guard subject.coverage > 0.05 else { return }
+
+        let b = subject.bounds
+        let face = CGRect(x: b.minX + b.width * 0.2,
+                          y: b.minY,
+                          width: b.width * 0.6,
+                          height: max(b.height * 0.45, 0.05))
+
+        let area = face.width * face.height
+        guard area > 0 else { return }
+
+        if let last = lastFocusArea, last > 0 {
+            guard abs(area / last - 1.0) > 0.4 else { return }
+        }
+
+        lastFocusArea = area
+        focusCooldownUntil = Date().addingTimeInterval(1)
+        device.focus(on: face)
+
+        // The bridge just switched the lens to one-shot AUTO. Unless the
+        // setting follows, the next push of any unrelated control — sharpness,
+        // say — sees afMode still reading Continuous, treats it as a change and
+        // restores continuous hunting, undoing the hold. Tap-to-focus already
+        // does this; automatic tracking has to as well.
+        settings.afMode = .auto
+    }
+
+    /// Forget where focus last landed.
+    ///
+    /// The hysteresis compares against the last focused area, so a stale value
+    /// suppresses the first trigger after the situation has changed: reconnect
+    /// with the subject the same size and nothing fires, and the same happens
+    /// after driving the lens by hand and handing it back to autofocus.
+    func resetFocusTracking() {
+        lastFocusArea = nil
+        focusCooldownUntil = nil
     }
 
     /// Cold settings changed; reboot the pipeline to pick them up.

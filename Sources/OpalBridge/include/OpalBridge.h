@@ -113,6 +113,16 @@ typedef struct {
     bool     manualFocus;
     int32_t  lensPosition;      // 0..255
 
+    // Clamp where autofocus is allowed to hunt, in the same 0..255
+    // lens-position space. A desk setup occupies a narrow band of that travel,
+    // so letting AF search the whole range means it repeatedly racks past you
+    // to find the far wall.
+    //
+    // afRangeInfinity <= afRangeMacro. Ignored unless limitAfRange is set.
+    bool     limitAfRange;
+    int32_t  afRangeInfinity;   // 0..255, the far end
+    int32_t  afRangeMacro;      // 0..255, the near end
+
     // White balance
     OpalAwbMode awbMode;
     bool     manualWhiteBalance;
@@ -164,6 +174,12 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c);
 void opal_trigger_autofocus(OpalDeviceHandle* h);
 // Normalized [0,1] rect within the frame; drives AE + AF metering region.
 void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float h_);
+
+// Focus only, leaving exposure metering where it is. An explicit tap means
+// "expose and focus here"; automatic subject tracking should not silently
+// re-aim metering the user may have deliberately pointed elsewhere, or turned
+// off entirely.
+void opal_set_af_region(OpalDeviceHandle* h, float x, float y, float w, float h_);
 // Auto-exposure metering region only (leaves focus alone). Used to meter on the
 // person rather than the whole frame — with a bright window behind you, a
 // full-frame average blows out the background and leaves your face in shadow.

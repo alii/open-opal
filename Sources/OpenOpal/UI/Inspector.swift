@@ -341,6 +341,45 @@ struct Inspector: View {
                         }
                         .onChange(of: settings.afMode) { camera.push() }
 
+                        // One-shot AF on the face box, re-triggered only when
+                        // your apparent size changes a lot. Stops the lens
+                        // reacting to background movement.
+                        Toggle("Follow face", isOn: $settings.focusOnSubject)
+                            .onChange(of: settings.focusOnSubject) { camera.push() }
+                            .help("Refocuses on your face only when you actually move closer or further away.")
+
+                        // Unrestricted AF hunts the whole lens travel, so a
+                        // gesture or someone walking past sends it racking to
+                        // the far wall and back. A desk sits in a narrow band.
+                        Toggle("Limit range", isOn: $settings.limitAfRange)
+                            .onChange(of: settings.limitAfRange) { camera.push() }
+                            .help("Stops autofocus hunting past your usual distance.")
+
+                        if settings.limitAfRange {
+                            Slider2("Far", value: Binding(
+                                get: { Double(settings.afRangeInfinity) },
+                                set: {
+                                    settings.afRangeInfinity = min(Int($0), settings.afRangeMacro)
+                                    camera.push()
+                                }
+                            ), range: 0...255, step: 1, display: "\(settings.afRangeInfinity)")
+
+                            Slider2("Near", value: Binding(
+                                get: { Double(settings.afRangeMacro) },
+                                set: {
+                                    settings.afRangeMacro = max(Int($0), settings.afRangeInfinity)
+                                    camera.push()
+                                }
+                            ), range: 0...255, step: 1, display: "\(settings.afRangeMacro)")
+
+                            // The live lens position is the only way to pick
+                            // sensible bounds: focus on yourself, read it, then
+                            // bracket it.
+                            Text("Lens now at \(camera.device.telemetry.lensPosition)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
                         Button {
                             camera.device.triggerAutofocus()
                         } label: {
