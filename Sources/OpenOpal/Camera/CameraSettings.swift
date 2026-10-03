@@ -270,7 +270,10 @@ final class CameraSettings {
         if let value = saved.meterOnSubject { meterOnSubject = value }
         if let value = saved.manualFocus { manualFocus = value }
         if let value = saved.lensPosition, (0...255).contains(value) { lensPosition = value }
-        if let value = saved.afMode { afMode = value }
+        // One-shot AUTO is what click-to-focus and face tracking leave behind to
+        // hold a focus. Restoring it would start every session with autofocus
+        // frozen, so a fresh launch goes back to the default mode instead.
+        if let value = saved.afMode, value != .auto { afMode = value }
         if let value = saved.focusOnSubject { focusOnSubject = value }
         if let value = saved.limitAfRange { limitAfRange = value }
         if let value = saved.afRangeInfinity, (0...255).contains(value) { afRangeInfinity = value }
