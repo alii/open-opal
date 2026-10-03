@@ -13,19 +13,19 @@ final class CameraSettings {
 
     // MARK: - Cold (require pipeline rebuild)
 
-    var outputMode: OutputMode = .fhd1080 { didSet { if oldValue != outputMode { coldDirty = true } } }
-    var fps: Int = 30                     { didSet { if oldValue != fps { coldDirty = true } } }
+    var outputMode: OutputMode = .fhd1080 { didSet { if oldValue != outputMode { coldDirty = true; save() } } }
+    var fps: Int = 30                     { didSet { if oldValue != fps { coldDirty = true; save() } } }
 
     /// The C1's sensor is mounted upside down in the housing — Opal's stock
     /// firmware corrects for it, so nobody ever knew. We boot our own pipeline,
     /// so we have to undo it ourselves. Done on the device ISP (free), which is
     /// why it's a cold setting.
-    var rotate180 = true                  { didSet { if oldValue != rotate180 { coldDirty = true } } }
+    var rotate180 = true                  { didSet { if oldValue != rotate180 { coldDirty = true; save() } } }
 
     /// Preview only. A webcam preview should read like a mirror, but the image
     /// other people see must NOT be mirrored or your text comes out backwards —
     /// so this never touches the frames themselves.
-    var mirrorPreview = true
+    var mirrorPreview = true { didSet { save() } }
 
     /// Set when a cold setting changed and the pipeline needs a reboot to catch up.
     var coldDirty = false
@@ -34,7 +34,7 @@ final class CameraSettings {
     /// Every mode below captures 4K and scales on the *device* ISP, because
     /// shipping full 4K NV12 over USB saturates SuperSpeed (~370 MB/s) and costs
     /// ~297ms of latency at only 20fps. Scaling first: ~50ms at a solid 30fps.
-    enum OutputMode: String, CaseIterable, Identifiable {
+    enum OutputMode: String, Codable, CaseIterable, Identifiable {
         case uhd4K   = "4K"
         case fhd1080 = "1080p"
         case hd720   = "720p"
@@ -70,17 +70,15 @@ final class CameraSettings {
 
     // MARK: - Exposure
 
-    var autoExposure = true
-    var exposureUs: Int = 8_000       // 1..33000 µs
-    var iso: Int = 400                // 100..1600
-    var evCompensation: Int = 0       // -9..9
-    var aeLock = false
+    var autoExposure = true { didSet { save() } }
+    var exposureUs: Int = 8_000 { didSet { save() } } // 1..33000 µs
+    var iso: Int = 400 { didSet { save() } } // 100..1600
+    var evCompensation: Int = 0 { didSet { save() } } // -9..9
+    var aeLock = false { didSet { save() } }
 
-    /// Meter exposure on the person, not the whole frame. With a window behind
-    /// you, a full-frame average exposes for the window and leaves your face in
-    /// shadow — which is exactly what a webcam should never do. Uses the same
-    /// segmentation mask the bokeh already computes, so it's free.
-    var meterOnSubject = true
+    /// Opt-in face metering. This runs person segmentation even with bokeh off,
+    /// so leave it disabled until the user needs help with a backlit subject.
+    var meterOnSubject = false { didSet { save() } }
 
     /// Shutter expressed the way a photographer thinks about it.
     var shutterFraction: String {
@@ -92,11 +90,11 @@ final class CameraSettings {
 
     // MARK: - Focus  (the C1 has a real autofocus lens)
 
-    var manualFocus = false
-    var lensPosition: Int = 120       // 0..255
-    var afMode: AFMode = .continuousVideo
+    var manualFocus = false { didSet { save() } }
+    var lensPosition: Int = 120 { didSet { save() } } // 0..255
+    var afMode: AFMode = .continuousVideo { didSet { save() } }
 
-    enum AFMode: String, CaseIterable, Identifiable {
+    enum AFMode: String, Codable, CaseIterable, Identifiable {
         case auto              = "Auto"
         case continuousVideo   = "Continuous"
         case macro             = "Macro"
@@ -106,12 +104,12 @@ final class CameraSettings {
 
     // MARK: - White balance
 
-    var manualWhiteBalance = false
-    var whiteBalanceK: Int = 5600     // 1000..12000
-    var awbMode: AWBMode = .auto
-    var awbLock = false
+    var manualWhiteBalance = false { didSet { save() } }
+    var whiteBalanceK: Int = 5600 { didSet { save() } } // 1000..12000
+    var awbMode: AWBMode = .auto { didSet { save() } }
+    var awbLock = false { didSet { save() } }
 
-    enum AWBMode: String, CaseIterable, Identifiable {
+    enum AWBMode: String, Codable, CaseIterable, Identifiable {
         case auto            = "Auto"
         case incandescent    = "Incandescent"
         case fluorescent     = "Fluorescent"
@@ -129,9 +127,9 @@ final class CameraSettings {
     /// isn't a multiple of that pulse, you get rolling bands across the frame.
     /// Pick the frequency of your local grid: 60Hz in the US/Americas, 50Hz in
     /// most of Europe/Asia/Africa.
-    var antiBanding: AntiBanding = .hz60
+    var antiBanding: AntiBanding = .hz60 { didSet { save() } }
 
-    enum AntiBanding: String, CaseIterable, Identifiable {
+    enum AntiBanding: String, Codable, CaseIterable, Identifiable {
         case off  = "Off"
         case hz50 = "50 Hz"
         case hz60 = "60 Hz"
@@ -150,20 +148,20 @@ final class CameraSettings {
 
     // MARK: - Image tuning
 
-    var sharpness: Int = 1            // 0..4
-    var lumaDenoise: Int = 1          // 0..4
-    var chromaDenoise: Int = 1        // 0..4
-    var brightness: Int = 0           // -10..10
-    var contrast: Int = 0             // -10..10
-    var saturation: Int = 0           // -10..10
+    var sharpness: Int = 1 { didSet { save() } } // 0..4
+    var lumaDenoise: Int = 1 { didSet { save() } } // 0..4
+    var chromaDenoise: Int = 1 { didSet { save() } } // 0..4
+    var brightness: Int = 0 { didSet { save() } } // -10..10
+    var contrast: Int = 0 { didSet { save() } } // -10..10
+    var saturation: Int = 0 { didSet { save() } } // -10..10
 
     // MARK: - Bokeh (host-side; see BokehRenderer)
 
     /// Most people want one switch and one slider. Everything else is here for
     /// the person who actually wants to argue with the ISP.
-    var showAdvanced = false
+    var showAdvanced = false { didSet { save() } }
 
-    var bokehEnabled = false
+    var bokehEnabled = false { didSet { save() } }
 
     /// The one bokeh control a normal person should ever touch: 0 = off, 1 = as
     /// much blur as we can give you. Mapped onto a real f-number underneath,
@@ -186,7 +184,7 @@ final class CameraSettings {
     /// Waiting costs latency (and some frame rate), and buys exact alignment.
     /// It's the right trade for a video call, where 80ms of latency is invisible
     /// but a blur lagging behind your head is not.
-    var syncBokeh = true
+    var syncBokeh = true { didSet { save() } }
 
     /// Blur everything behind the subject by the same amount, ignoring depth.
     ///
@@ -199,14 +197,14 @@ final class CameraSettings {
     /// synchronous mode is latency you feel. All of that budget goes into a better
     /// mask instead, which is where the visible quality actually lives. This is
     /// essentially what Google Meet does, and it's why Meet looks clean.
-    var uniformBlur = true
+    var uniformBlur = true { didSet { save() } }
 
     /// How much compute to spend on the mask. With depth gone, we can afford the
     /// good one — and the mask is now the only thing standing between us and a
     /// clean edge, so it's worth every millisecond.
-    var matteQuality: MatteQuality = .accurate
+    var matteQuality: MatteQuality = .accurate { didSet { save() } }
 
-    enum MatteQuality: String, CaseIterable, Identifiable {
+    enum MatteQuality: String, Codable, CaseIterable, Identifiable {
         case fast     = "Fast"
         case balanced = "Balanced"
         case accurate = "Accurate"
@@ -221,19 +219,150 @@ final class CameraSettings {
         }
     }
     /// Real lens math: smaller f-number = shallower depth of field.
-    var aperture: Double = 2.8        // f/1.4 .. f/16
+    var aperture: Double = 2.8 { didSet { save() } } // f/1.4 .. f/16
     /// Where the focal plane sits, as normalized scene depth (0 = near, 1 = far).
-    var focusDistance: Double = 0.35
+    var focusDistance: Double = 0.35 { didSet { save() } }
     /// Follow the subject automatically instead of a fixed focal plane.
-    var autoFocusSubject = true
-    var apertureShape: ApertureShape = .circular
+    var autoFocusSubject = true { didSet { save() } }
+    var apertureShape: ApertureShape = .circular { didSet { save() } }
     /// Bloom on specular highlights — what makes bokeh read as glass, not blur.
-    var highlightBloom: Double = 0.55
+    var highlightBloom: Double = 0.55 { didSet { save() } }
 
-    enum ApertureShape: String, CaseIterable, Identifiable {
+    enum ApertureShape: String, Codable, CaseIterable, Identifiable {
         case circular  = "Circular"
         case hexagonal = "Hexagonal"
         var id: String { rawValue }
+    }
+
+    // MARK: - Saved camera controls
+
+    static let persistenceKey = "cameraSettings.v1"
+    @ObservationIgnored private let preferences: UserDefaults
+    @ObservationIgnored private var restoring = true
+
+    /// Restore before connecting; missing or invalid values keep the defaults above.
+    init(preferences: UserDefaults = .standard) {
+        self.preferences = preferences
+        defer { restoring = false; coldDirty = false }
+        guard let data = preferences.data(forKey: Self.persistenceKey),
+              let saved = try? JSONDecoder().decode(SavedControls.self, from: data),
+              saved.version == 1 else { return }
+        if let value = saved.outputMode { outputMode = value }
+        if let value = saved.fps, (1...outputMode.maxFps).contains(value) { fps = value }
+        if let value = saved.rotate180 { rotate180 = value }
+        if let value = saved.mirrorPreview { mirrorPreview = value }
+        if let value = saved.autoExposure { autoExposure = value }
+        if let value = saved.exposureUs, (1...maxExposureUs).contains(value) { exposureUs = value }
+        if let value = saved.iso, (100...1600).contains(value) { iso = value }
+        if let value = saved.evCompensation, (-9...9).contains(value) { evCompensation = value }
+        if let value = saved.aeLock { aeLock = value }
+        if let value = saved.meterOnSubject { meterOnSubject = value }
+        if let value = saved.manualFocus { manualFocus = value }
+        if let value = saved.lensPosition, (0...255).contains(value) { lensPosition = value }
+        if let value = saved.afMode { afMode = value }
+        if let value = saved.manualWhiteBalance { manualWhiteBalance = value }
+        if let value = saved.whiteBalanceK, (1000...12000).contains(value) { whiteBalanceK = value }
+        if let value = saved.awbMode { awbMode = value }
+        if let value = saved.awbLock { awbLock = value }
+        if let value = saved.antiBanding { antiBanding = value }
+        if let value = saved.sharpness, (0...4).contains(value) { sharpness = value }
+        if let value = saved.lumaDenoise, (0...4).contains(value) { lumaDenoise = value }
+        if let value = saved.chromaDenoise, (0...4).contains(value) { chromaDenoise = value }
+        if let value = saved.brightness, (-10...10).contains(value) { brightness = value }
+        if let value = saved.contrast, (-10...10).contains(value) { contrast = value }
+        if let value = saved.saturation, (-10...10).contains(value) { saturation = value }
+        if let value = saved.showAdvanced { showAdvanced = value }
+        if let value = saved.bokehEnabled { bokehEnabled = value }
+        if let value = saved.syncBokeh { syncBokeh = value }
+        if let value = saved.uniformBlur { uniformBlur = value }
+        if let value = saved.matteQuality { matteQuality = value }
+        if let value = saved.aperture, (1.4...16).contains(value) { aperture = value }
+        if let value = saved.focusDistance, (0...1).contains(value) { focusDistance = value }
+        if let value = saved.autoFocusSubject { autoFocusSubject = value }
+        if let value = saved.apertureShape { apertureShape = value }
+        if let value = saved.highlightBloom, (0...1).contains(value) { highlightBloom = value }
+    }
+
+    private func save() {
+        guard !restoring else { return }
+        let saved = SavedControls(
+            outputMode: outputMode,
+            fps: fps,
+            rotate180: rotate180,
+            mirrorPreview: mirrorPreview,
+            autoExposure: autoExposure,
+            exposureUs: exposureUs,
+            iso: iso,
+            evCompensation: evCompensation,
+            aeLock: aeLock,
+            meterOnSubject: meterOnSubject,
+            manualFocus: manualFocus,
+            lensPosition: lensPosition,
+            afMode: afMode,
+            manualWhiteBalance: manualWhiteBalance,
+            whiteBalanceK: whiteBalanceK,
+            awbMode: awbMode,
+            awbLock: awbLock,
+            antiBanding: antiBanding,
+            sharpness: sharpness,
+            lumaDenoise: lumaDenoise,
+            chromaDenoise: chromaDenoise,
+            brightness: brightness,
+            contrast: contrast,
+            saturation: saturation,
+            showAdvanced: showAdvanced,
+            bokehEnabled: bokehEnabled,
+            syncBokeh: syncBokeh,
+            uniformBlur: uniformBlur,
+            matteQuality: matteQuality,
+            aperture: aperture,
+            focusDistance: focusDistance,
+            autoFocusSubject: autoFocusSubject,
+            apertureShape: apertureShape,
+            highlightBloom: highlightBloom
+        )
+        if let data = try? JSONEncoder().encode(saved) {
+            preferences.set(data, forKey: Self.persistenceKey)
+        }
+    }
+
+    /// Optional fields allow older saved settings to inherit newly added defaults.
+    private struct SavedControls: Codable {
+        var version: Int = 1
+        var outputMode: OutputMode?
+        var fps: Int?
+        var rotate180: Bool?
+        var mirrorPreview: Bool?
+        var autoExposure: Bool?
+        var exposureUs: Int?
+        var iso: Int?
+        var evCompensation: Int?
+        var aeLock: Bool?
+        var meterOnSubject: Bool?
+        var manualFocus: Bool?
+        var lensPosition: Int?
+        var afMode: AFMode?
+        var manualWhiteBalance: Bool?
+        var whiteBalanceK: Int?
+        var awbMode: AWBMode?
+        var awbLock: Bool?
+        var antiBanding: AntiBanding?
+        var sharpness: Int?
+        var lumaDenoise: Int?
+        var chromaDenoise: Int?
+        var brightness: Int?
+        var contrast: Int?
+        var saturation: Int?
+        var showAdvanced: Bool?
+        var bokehEnabled: Bool?
+        var syncBokeh: Bool?
+        var uniformBlur: Bool?
+        var matteQuality: MatteQuality?
+        var aperture: Double?
+        var focusDistance: Double?
+        var autoFocusSubject: Bool?
+        var apertureShape: ApertureShape?
+        var highlightBloom: Double?
     }
 
     // MARK: - Presets
@@ -247,9 +376,11 @@ final class CameraSettings {
 
     func reset() {
         autoExposure = true; evCompensation = 0; aeLock = false
+        meterOnSubject = false
         exposureUs = 8_000; iso = 400
         manualFocus = false; afMode = .continuousVideo; lensPosition = 120
         manualWhiteBalance = false; awbMode = .auto; whiteBalanceK = 5600; awbLock = false
+        antiBanding = .hz60
         sharpness = 1; lumaDenoise = 1; chromaDenoise = 1
         brightness = 0; contrast = 0; saturation = 0
     }

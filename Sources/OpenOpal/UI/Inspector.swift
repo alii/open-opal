@@ -89,16 +89,21 @@ struct Inspector: View {
                             .buttonStyle(.glass)
                             .controlSize(.small)
                     case .unknown:
-                        Note("Puts the processed image — blur and all — into every video app as “Open Opal Camera”.",
-                             tone: .hint)
-                        Button {
-                            camera.installer.install()
-                        } label: {
-                            Label("Install virtual camera", systemImage: "arrow.down.circle")
-                                .frame(maxWidth: .infinity)
+                        if !camera.installer.isIncludedInApp {
+                            Note("This build supports camera controls and preview. Use a signed extension build to make the camera available to video apps.",
+                                 tone: .hint)
+                        } else {
+                            Note("Puts the processed image — blur and all — into every video app as “Open Opal Camera”.",
+                                 tone: .hint)
+                            Button {
+                                camera.installer.install()
+                            } label: {
+                                Label("Install virtual camera", systemImage: "arrow.down.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .controlSize(.small)
                         }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.small)
                     }
                 }
 

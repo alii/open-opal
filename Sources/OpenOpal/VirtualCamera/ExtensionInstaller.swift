@@ -14,7 +14,20 @@ private let log = Logger(subsystem: "com.openopal", category: "sysext")
 @MainActor
 final class ExtensionInstaller: NSObject {
 
-    static let extensionID = "sh.alistair.open-opal.camera"
+    static var extensionID: String? {
+        guard let appID = Bundle.main.bundleIdentifier, !appID.isEmpty else { return nil }
+        return appID + ".camera"
+    }
+
+    var isIncludedInApp: Bool {
+        guard let extensionID = Self.extensionID else { return false }
+        let extensionURL = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Library/SystemExtensions")
+            .appendingPathComponent("\(extensionID).systemextension")
+        guard let bundle = Bundle(url: extensionURL), bundle.bundleIdentifier == extensionID,
+              let executableURL = bundle.executableURL else { return false }
+        return FileManager.default.fileExists(atPath: executableURL.path)
+    }
 
     enum Status: Equatable {
         case unknown
@@ -56,7 +69,8 @@ final class ExtensionInstaller: NSObject {
             let pkg = ext.infoDictionary?["CFBundlePackageType"] as? String ?? "nil"
             out.append("extension: \(id)")
             out.append("  package type: \(pkg)\(pkg == "SYSX" ? "" : "  ← must be SYSX")")
-            out.append("  matches requested id: \(id == Self.extensionID ? "yes" : "NO (want \(Self.extensionID))")")
+            let requestedID = Self.extensionID ?? "unavailable (missing app bundle identifier)"
+            out.append("  matches requested id: \(id == requestedID ? "yes" : "NO (want \(requestedID))")")
             let exec = ext.executableURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
             out.append("  executable present: \(exec ? "yes" : "NO")")
         }
@@ -71,17 +85,29 @@ final class ExtensionInstaller: NSObject {
     }
 
     func install() {
+        guard let extensionID = Self.extensionID else {
+            status = .failed("The app bundle identifier is missing.")
+            return
+        }
+        guard isIncludedInApp else {
+            status = .failed("This build does not include the virtual camera extension.")
+            return
+        }
         diagnose()
         status = .installing
         let request = OSSystemExtensionRequest.activationRequest(
-            forExtensionWithIdentifier: Self.extensionID, queue: .main)
+            forExtensionWithIdentifier: extensionID, queue: .main)
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
     func uninstall() {
+        guard let extensionID = Self.extensionID else {
+            status = .failed("The app bundle identifier is missing.")
+            return
+        }
         let request = OSSystemExtensionRequest.deactivationRequest(
-            forExtensionWithIdentifier: Self.extensionID, queue: .main)
+            forExtensionWithIdentifier: extensionID, queue: .main)
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
     }

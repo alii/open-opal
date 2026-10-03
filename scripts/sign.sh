@@ -9,6 +9,10 @@ IDENTITY="${IDENTITY:-Developer ID Application: Alistair Smith (RD994J874S)}"
 EXT="$APP/Contents/Library/SystemExtensions/sh.alistair.open-opal.camera.systemextension"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+echo "==> validating bundled dependencies"
+# No Homebrew/build-machine paths may survive into hardened-runtime signing.
+python3 "$ROOT/scripts/bundle-dependencies.py" "$APP" --validate-only
+
 echo "==> embedding provisioning profiles"
 # Restricted entitlements (system-extension.install) are only honored when a
 # provisioning profile in the bundle grants them. Developer ID signing alone

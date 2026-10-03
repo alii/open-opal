@@ -160,7 +160,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
     private func findSinkStream(device: CMIOObjectID) -> CMIOStreamID? {
         var address = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIODevicePropertyStreams),
-            mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+            mScope: CMIOObjectPropertyScope(kCMIODevicePropertyScopeOutput),
             mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
 
         var dataSize: UInt32 = 0
@@ -172,8 +172,8 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         guard CMIOObjectGetPropertyData(device, &address, 0, nil, dataSize, &used, &streams) == noErr
         else { return nil }
 
-        // Direction 1 = the stream CONSUMES data (our sink); 0 = it produces
-        // frames for capture clients.
+        // The legacy CMIO property uses 0 = output/playback (our sink) and
+        // 1 = input/capture. This differs from CMIOExtensionStream.Direction.
         for stream in streams {
             var dirAddress = CMIOObjectPropertyAddress(
                 mSelector: CMIOObjectPropertySelector(kCMIOStreamPropertyDirection),
@@ -184,7 +184,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
             if CMIOObjectGetPropertyData(stream, &dirAddress, 0, nil,
                                          UInt32(MemoryLayout<UInt32>.size),
                                          &dirUsed, &direction) == noErr,
-               direction == 1 {
+               direction == 0 {
                 return stream
             }
         }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build -> sign -> notarize -> staple -> install.
+# Build -> bundle dependencies -> sign -> notarize -> staple -> install.
 #
 # Notarization is NOT optional here. A CoreMediaIO system extension will only
 # load if macOS can validate it, and outside the App Store the only paths are
@@ -28,6 +28,9 @@ xcodegen generate >/dev/null
 xcodebuild -project OpenOpal.xcodeproj -scheme OpenOpal \
   -configuration Release -derivedDataPath "$DERIVED" build \
   > build/xcodebuild.log 2>&1 || { tail -25 build/xcodebuild.log; exit 1; }
+
+echo "==> bundling runtime dependencies"
+python3 ./scripts/bundle-dependencies.py "$APP"
 
 echo "==> signing"
 ./scripts/sign.sh "$APP" >/dev/null
