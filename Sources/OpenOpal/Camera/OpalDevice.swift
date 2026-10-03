@@ -183,7 +183,10 @@ final class OpalDevice {
         state = .streaming
         apply(settings)
         startTelemetry()
-        log.info("streaming \(self.resolution.w)x\(self.resolution.h) from \(self.sensorName, privacy: .public)")
+        // Dimensions come from the first delivered frame, which has not arrived
+        // yet at this point, so claiming "0x0" here is just wrong. The renderer
+        // logs the real size when it allocates.
+        log.info("streaming from \(self.sensorName, privacy: .public)")
     }
 
     func disconnect() {
@@ -299,9 +302,16 @@ final class OpalDevice {
             default: "USB"
             }
         }
-        // The sensor reports itself as "LCM48", which is Luxonis's name for the
-        // 48MP Sony IMX582 module. Show the part people recognize.
-        if sensorName == "LCM48" { sensorName = "Sony IMX582 (48MP)" }
+        // Show the part people recognise. "LCM48" is Luxonis's name for the
+        // module carrying the 48MP IMX582; earlier cameras report their sensor
+        // directly and carry the 12MP IMX378 instead.
+        switch sensorName {
+        case "LCM48":  sensorName = "Sony IMX582 (48MP)"
+        case "IMX582": sensorName = "Sony IMX582 (48MP)"
+        case "IMX378": sensorName = "Sony IMX378 (12MP)"
+        case "IMX538": sensorName = "Sony IMX538"
+        default: break
+        }
     }
 
     private func startTelemetry() {
