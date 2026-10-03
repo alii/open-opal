@@ -47,6 +47,22 @@ cp -R build/DerivedData/Build/Products/Release/OpenOpal.app /Applications/
 Use Release builds for day-to-day use — Debug builds noticeably stutter in UI
 animations.
 
+First-generation IMX378 C1s use a RAM-only bootloader handoff. The pinned
+DepthAI SDK patch allows only `GetBootloaderVersion` and `UsbRomBoot` to bypass
+the version check when the bootloader reports exactly `0.0.0`; unrelated
+requests keep their version checks. Existing SDK libraries must be rebuilt
+with `./scripts/bootstrap.sh` after updating this patch, then the app rebuilt.
+Bootstrap refuses SDK source with the older unrestricted `OPAL_C1_PATCH`:
+restore only its two request-version checks to upstream v2.30.0, preserving any
+other SDK edits, before rerunning bootstrap.
+
+The camera-free safety regressions compile isolated C++ harnesses without
+linking DepthAI or accessing USB:
+
+```sh
+python3 -m unittest discover -s scripts/tests -p 'test_boot_safety.py'
+```
+
 ## The hardware
 
 Little of this is documented elsewhere, so for the record:
@@ -79,6 +95,12 @@ pipeline graph that the firmware instantiates on the VPU. Quitting reboots
 the camera back to its stock firmware within a few seconds. Nothing is ever
 written to flash, so the takeover can't brick anything. The app narrates
 each stage live while connecting, with real sizes and timings.
+
+For first-generation IMX378 C1s, the stock camera must present both video and
+audio interfaces before Open Opal attempts the handoff. Every reconnect must
+report the selected camera's MxID. If that ID disappears or changes, Open Opal
+fails safely without uploading the pipeline, even if only one unbooted device
+is attached. A USB address change is allowed; an unidentified device is not.
 
 ```
 Myriad X (IMX582)

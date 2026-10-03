@@ -1,34 +1,41 @@
-diff --git i/src/device/DeviceBootloader.cpp w/src/device/DeviceBootloader.cpp
-index 5a6ff08..ac2b3db 100644
+diff --git a/src/device/DeviceBootloader.cpp b/src/device/DeviceBootloader.cpp
 --- a/src/device/DeviceBootloader.cpp
 +++ b/src/device/DeviceBootloader.cpp
-@@ -1407,8 +1407,12 @@ template <typename T>
+@@ -2,6 +2,7 @@
+ 
+ // std
+ #include <fstream>
++#include <type_traits>
+ 
+ // shared
+ #include "depthai-bootloader-shared/Bootloader.hpp"
+@@ -1407,8 +1408,12 @@ template <typename T>
  bool DeviceBootloader::sendRequest(const T& request) {
      if(stream == nullptr) return false;
  
 -    // Do a version check beforehand (compare just the semver)
 -    if(getVersion().getSemver() < Version(T::VERSION)) {
-+    // OPAL_C1_PATCH: the Opal C1's flashed bootloader reports 0.0.0 yet answers
-+    // GetBootloaderVersion, which nominally requires 0.0.2 -- so the reported
-+    // version is not a usable capability signal on this device. When it is
-+    // 0.0.0, skip the client-side gate and let the device reject what it
-+    // genuinely cannot do.
-+    if(getVersion().getSemver() != Version(0, 0, 0) && getVersion().getSemver() < Version(T::VERSION)) {
++    // OPAL_C1_RAM_HANDOFF_PATCH: only the version query and USB ROM jump are
++    // needed on the C1's 0.0.0 bootloader. All other requests keep their gate.
++    const bool legacyRamRequest = getVersion().getSemver() == Version(0, 0, 0)
++                                  && (std::is_same<T, Request::GetBootloaderVersion>::value
++                                      || std::is_same<T, Request::UsbRomBoot>::value);
++    if(!legacyRamRequest && getVersion().getSemver() < Version(T::VERSION)) {
          throw std::runtime_error(
              fmt::format("Bootloader version {} required to send request '{}'. Current version {}", T::VERSION, T::NAME, getVersion().toString()));
      }
-@@ -1426,8 +1430,12 @@ template <typename T>
+@@ -1426,8 +1431,12 @@ template <typename T>
  void DeviceBootloader::sendRequestThrow(const T& request) {
      if(stream == nullptr) throw std::runtime_error("Couldn't send request. Stream is null");
  
 -    // Do a version check beforehand (compare just the semver)
 -    if(getVersion().getSemver() < Version(T::VERSION)) {
-+    // OPAL_C1_PATCH: the Opal C1's flashed bootloader reports 0.0.0 yet answers
-+    // GetBootloaderVersion, which nominally requires 0.0.2 -- so the reported
-+    // version is not a usable capability signal on this device. When it is
-+    // 0.0.0, skip the client-side gate and let the device reject what it
-+    // genuinely cannot do.
-+    if(getVersion().getSemver() != Version(0, 0, 0) && getVersion().getSemver() < Version(T::VERSION)) {
++    // OPAL_C1_RAM_HANDOFF_PATCH: only the version query and USB ROM jump are
++    // needed on the C1's 0.0.0 bootloader. All other requests keep their gate.
++    const bool legacyRamRequest = getVersion().getSemver() == Version(0, 0, 0)
++                                  && (std::is_same<T, Request::GetBootloaderVersion>::value
++                                      || std::is_same<T, Request::UsbRomBoot>::value);
++    if(!legacyRamRequest && getVersion().getSemver() < Version(T::VERSION)) {
          throw std::runtime_error(
              fmt::format("Bootloader version {} required to send request '{}'. Current version {}", T::VERSION, T::NAME, getVersion().toString()));
      }

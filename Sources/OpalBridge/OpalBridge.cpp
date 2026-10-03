@@ -268,13 +268,15 @@ static bool looksLikeStockC1(const std::string& mxid) {
 
 static bool findDeviceInState(XLinkDeviceState_t want, const std::string& mxid,
                               dai::DeviceInfo& out, double timeoutSeconds) {
+    // An empty identity must never turn a targeted reconnect into discovery.
+    if(mxid.empty()) return false;
     auto deadline = std::chrono::steady_clock::now()
                   + std::chrono::milliseconds((long)(timeoutSeconds * 1000));
     while(std::chrono::steady_clock::now() < deadline) {
         // Re-enumerate every pass: the USB path is not stable across a reboot.
         for(const auto& d : dai::XLinkConnection::getAllConnectedDevices()) {
             if(d.state != want) continue;
-            if(!mxid.empty() && d.getMxId() != mxid) continue;
+            if(d.getMxId() != mxid) continue;
             out = d;
             return true;
         }
@@ -315,8 +317,8 @@ static bool prepareLegacyDevice(const std::string& mxid, dai::DeviceInfo& unboot
     bootLog("bootloader reached - requesting USB ROM boot");
 
     // Stage 2: hand off to the Myriad ROM. These cameras report bootloader
-    // version 0.0.0 while still servicing requests that nominally need more,
-    // so depthai's client-side version check must tolerate 0.0.0 here.
+    // version 0.0.0. The SDK exception is limited to GetBootloaderVersion and
+    // UsbRomBoot, the only requests needed for this RAM-only handoff.
     try {
         dai::DeviceBootloader loader(bl, false);
         loader.bootUsbRomBootloader();
@@ -325,29 +327,13 @@ static bool prepareLegacyDevice(const std::string& mxid, dai::DeviceInfo& unboot
         return false;
     }
 
-    // Stage 3: catch the ROM.
-    //
-    // Prefer an id match. The ROM bootloader does not always report the same id
-    // as the running firmware, so a fallback is needed — but "any unbooted
-    // device" is too loose: with a second DepthAI device attached and unbooted,
-    // the pipeline could be uploaded to that one while the intended camera sits
-    // waiting. So the fallback insists there is exactly one candidate.
+    // Stage 3: catch the ROM only if it still reports the selected camera's ID.
+    // A sole unbooted device is not proof of identity: it could be unrelated.
+    // If the ROM changes or omits the ID, fail without uploading the pipeline.
     if(!findDeviceInState(X_LINK_UNBOOTED, mxid, unbooted, 25.0)) {
-        std::vector<dai::DeviceInfo> candidates;
-        for(const auto& d : dai::XLinkConnection::getAllConnectedDevices()) {
-            if(d.state == X_LINK_UNBOOTED) candidates.push_back(d);
-        }
-        if(candidates.size() == 1) {
-            unbooted = candidates.front();
-            bootLog("ROM reports a different id; matched the only unbooted device");
-        } else if(candidates.empty()) {
-            setError("camera never re-enumerated as an unbooted device");
-            return false;
-        } else {
-            setError("several unbooted devices are attached and the ROM did not "
-                     "report a matching id; refusing to guess which is the camera");
-            return false;
-        }
+        setError("camera did not re-enumerate with its selected id; "
+                 "refusing to upload firmware to an unidentified device");
+        return false;
     }
     bootLog("ROM bootloader reached - handing off to depthai");
     return true;

@@ -45,15 +45,16 @@ hunter_config(
 EOF
 fi
 
-# First-generation (IMX378) Opal C1s ship a bootloader that reports version
-# 0.0.0 while still servicing requests that nominally need a higher one --
-# GetBootloaderVersion is itself declared 0.0.2, and the device answers it. So
-# depthai's client-side version check is a false negative there, and it blocks
-# the UsbRomBoot needed to reach the Myriad ROM. Patch it to let requests
-# through when the reported version is exactly 0.0.0, leaving every other
-# version untouched.
-if ! grep -q "OPAL_C1_PATCH" "$SRC/src/device/DeviceBootloader.cpp"; then
-  echo "==> patching depthai-core: allow requests on a 0.0.0 bootloader"
+# First-generation C1s report 0.0.0. Only GetBootloaderVersion and UsbRomBoot
+# bypass the version gate for the RAM-only handoff; all other requests keep it.
+# Do not silently reuse an SDK containing the older, unrestricted exception.
+if grep -q "OPAL_C1_PATCH" "$SRC/src/device/DeviceBootloader.cpp"; then
+  echo "error: depthai-core contains the old unrestricted C1 patch." >&2
+  echo "Restore its two request-version checks to upstream $DEPTHAI_TAG, preserving other local changes, then rerun bootstrap." >&2
+  exit 1
+fi
+if ! grep -q "OPAL_C1_RAM_HANDOFF_PATCH" "$SRC/src/device/DeviceBootloader.cpp"; then
+  echo "==> patching depthai-core: allow only the 0.0.0 RAM handoff requests"
   git -C "$SRC" apply "$ROOT/patches/depthai-bootloader-0.0.0.patch"
 fi
 
