@@ -188,6 +188,15 @@ few seconds to boot when OpenOpal launches.
 
 Working: camera control, live preview, background blur, virtual camera.
 
+## Thanks
+
+A huge thank you to [Jamie Dubs](https://github.com/jamiew), who added
+support for first-generation IMX378 C1s, follow-face autofocus with lens range
+limits, custom camera tuning files, the detachable menu bar panel, the virtual
+camera format fix, readable sensor names and CI. Thanks also to
+[Niek](https://github.com/Niek) for the bundling fixes, saved settings and
+auto-start.
+
 ## License
 
 MIT. Not affiliated with Opal Camera Inc. Thanks to Luxonis for DepthAI, and
