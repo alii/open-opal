@@ -162,7 +162,7 @@ final class CameraModel {
         await device.connect(settings: settings)
     }
 
-    func stop() { device.disconnect() }
+    func stop() { device.shutdown() }
 
     func reconnect() async {
         guard !isStarting, !isRebooting else { return }

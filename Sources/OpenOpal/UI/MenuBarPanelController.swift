@@ -38,6 +38,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
             button.image = NSImage(systemSymbolName: "camera.aperture", accessibilityDescription: "Open Opal")
             button.target = self
             button.action = #selector(toggle)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.toolTip = "Open Opal controls"
         }
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
@@ -60,6 +61,12 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func toggle() {
+        // An accessory app has no Dock icon to quit from, so right-click is
+        // the way out that does not depend on the panel.
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showMenu()
+            return
+        }
         if panel.isVisible && !isFloating {
             panel.orderOut(nil)
         } else {
@@ -67,6 +74,13 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
             panel.makeKeyAndOrderFront(nil)
             onShow?()
         }
+    }
+
+    private func showMenu() {
+        guard let button = statusItem.button else { return }
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Quit Open Opal", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
     }
 
     func detach() {
