@@ -22,7 +22,6 @@ import os.log
 private let log = OSLog(subsystem: "com.openopal.camera", category: "extension")
 
 // Fixed identity: apps remember cameras by unique ID, so these must never change.
-let kDeviceUUID = UUID(uuidString: "7E671FBA-4A0A-4B0A-8F5D-3A1A1B4DE6F2")!
 let kSourceStreamUUID = UUID(uuidString: "7E671FBA-4A0A-4B0A-8F5D-3A1A1B4DE6F3")!
 let kSinkStreamUUID = UUID(uuidString: "7E671FBA-4A0A-4B0A-8F5D-3A1A1B4DE6F4")!
 
@@ -107,7 +106,7 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
         super.init()
 
         device = CMIOExtensionDevice(localizedName: "Open Opal Camera",
-                                     deviceID: kDeviceUUID,
+                                     deviceID: CameraDemand.deviceUUID,
                                      legacyDeviceID: nil,
                                      source: self)
 
@@ -171,15 +170,32 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
         streamingCounter += 1
         let first = streamingCounter == 1
         stateLock.unlock()
-        if first { startSplashTimer() }
+        if first {
+            startSplashTimer()
+            sourceStream.notifyPropertiesChanged([
+                CameraDemand.property: CameraDemand.propertyState(isActive: true)
+            ])
+        }
     }
 
     func stoppedStreaming() {
         stateLock.lock()
+        let wasStreaming = streamingCounter > 0
         streamingCounter = max(0, streamingCounter - 1)
-        let last = streamingCounter == 0
+        let last = wasStreaming && streamingCounter == 0
         stateLock.unlock()
-        if last { stopSplashTimer() }
+        if last {
+            stopSplashTimer()
+            sourceStream.notifyPropertiesChanged([
+                CameraDemand.property: CameraDemand.propertyState(isActive: false)
+            ])
+        }
+    }
+
+    fileprivate var hasCaptureClients: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return streamingCounter > 0
     }
 
     /// 30Hz heartbeat: if the app hasn't fed the sink recently, serve the splash
@@ -236,7 +252,7 @@ fileprivate final class SourceStreamSource: NSObject, CMIOExtensionStreamSource 
     var activeFormatIndex = 0
 
     var availableProperties: Set<CMIOExtensionProperty> {
-        [.streamActiveFormatIndex, .streamFrameDuration]
+        [.streamActiveFormatIndex, .streamFrameDuration, CameraDemand.property]
     }
 
     func streamProperties(forProperties properties: Set<CMIOExtensionProperty>) throws
@@ -245,6 +261,10 @@ fileprivate final class SourceStreamSource: NSObject, CMIOExtensionStreamSource 
         if properties.contains(.streamActiveFormatIndex) { p.activeFormatIndex = 0 }
         if properties.contains(.streamFrameDuration) {
             p.frameDuration = CMTime(value: 1, timescale: Int32(kFrameRate))
+        }
+        if properties.contains(CameraDemand.property) {
+            p.setPropertyState(CameraDemand.propertyState(isActive: deviceSource.hasCaptureClients),
+                               forProperty: CameraDemand.property)
         }
         return p
     }

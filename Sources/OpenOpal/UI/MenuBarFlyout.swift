@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarFlyout: View {
     @Environment(CameraModel.self) private var camera
     let controller: MenuBarPanelController
+    @State private var focusPulse: CGPoint?
 
     var body: some View {
         GeometryReader { geometry in
@@ -60,12 +61,27 @@ struct MenuBarFlyout: View {
                 Color.black
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .overlay {
-                        MetalPreview(
-                            texture: camera.latestTexture,
-                            mirrored: camera.settings.mirrorPreview,
-                            paused: camera.previewPaused
-                        ) { _, sensorPoint in
-                            camera.focus(at: sensorPoint)
+                        GeometryReader { preview in
+                            MetalPreview(
+                                texture: camera.latestTexture,
+                                mirrored: camera.settings.mirrorPreview,
+                                paused: camera.previewPaused
+                            ) { viewPoint, sensorPoint in
+                                // Focus in sensor space; draw the reticle where the user clicked.
+                                camera.focus(at: sensorPoint)
+                                let p = CGPoint(x: viewPoint.x * preview.size.width,
+                                                y: viewPoint.y * preview.size.height)
+                                withAnimation(.smooth) { focusPulse = p }
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(900))
+                                    withAnimation(.easeOut) { focusPulse = nil }
+                                }
+                            }
+                            if let focusPulse {
+                                FocusReticle()
+                                    .position(x: focusPulse.x, y: focusPulse.y)
+                                    .allowsHitTesting(false)
+                            }
                         }
                     }
                     .frame(height: min(geometry.size.width * 9 / 16, geometry.size.height * 0.4))
@@ -92,7 +108,6 @@ struct MenuBarFlyout: View {
                         }
                         Divider()
                         Button("Quit Open Opal") { NSApp.terminate(nil) }
-                            .keyboardShortcut("q")
                     } label: {
                         Label("Camera", systemImage: "camera.aperture")
                     }
@@ -110,6 +125,7 @@ struct MenuBarFlyout: View {
                 .padding(12)
             }
         }
+        .background { shortcuts }
         .padding(.top, controller.isFloating ? 0 : 10)
         .background(.regularMaterial, in: outline)
         .clipShape(outline)
@@ -120,8 +136,54 @@ struct MenuBarFlyout: View {
         PanelOutline(arrowX: controller.anchorOffset, floating: controller.isFloating)
     }
 
+    /// The app has no main menu as an accessory, so the old Camera menu's
+    /// shortcuts live here and work while the panel is key.
+    private var shortcuts: some View {
+        Group {
+            Button("Reconnect") { Task { await camera.reconnect() } }
+                .keyboardShortcut("r")
+            Button("Trigger Autofocus") { camera.device.triggerAutofocus() }
+                .keyboardShortcut("f")
+                .disabled(!camera.device.state.isLive)
+            Button("Toggle Advanced Settings") { camera.settings.showAdvanced.toggle() }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+            Button("Freeze Preview") { camera.previewFrozen.toggle() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            Button("Quit Open Opal") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
     @ViewBuilder
     private var status: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            statusLine
+            if showsBootLog, !camera.device.bootLog.isEmpty {
+                // The bridge narrates the takeover as it happens.
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(camera.device.bootLog.suffix(6).enumerated()), id: \.offset) { _, line in
+                        Text(line).lineLimit(1).truncationMode(.tail)
+                    }
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var showsBootLog: Bool {
+        switch camera.device.state {
+        case .searching, .connecting, .failed: true
+        case .notFound, .streaming: false
+        }
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
         switch camera.device.state {
         case .searching, .connecting:
             HStack {
@@ -139,6 +201,20 @@ struct MenuBarFlyout: View {
             )
             .monospacedDigit()
         }
+    }
+}
+
+private struct FocusReticle: View {
+    @State private var scale: CGFloat = 1.35
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .strokeBorder(.yellow.opacity(0.9), lineWidth: 1.5)
+            .frame(width: 52, height: 52)
+            .scaleEffect(scale)
+            .onAppear {
+                withAnimation(.spring(duration: 0.35)) { scale = 1.0 }
+            }
     }
 }
 

@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             content: NSHostingController(
                 rootView:
                     MenuBarFlyout(controller: controls).environment(camera)))
+        // An accessory app rarely becomes active, so refresh when shown instead.
+        controls.onShow = { [camera] in camera.autoLaunch.refresh() }
         Task { await camera.start() }
     }
 

@@ -14,6 +14,8 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     private var dragMonitor: Any?
     private var isDragging = false
     private var floatingSize = NSSize(width: 440, height: 780)
+    /// Called whenever the controls are brought on screen.
+    var onShow: (() -> Void)?
 
     func install(content: NSViewController) {
         let panel = ControlsPanel(
@@ -40,7 +42,8 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         }
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.isDragging else { return }
+                // A floating window stays put, like any other window.
+                guard let self, !self.isDragging, !self.isFloating else { return }
                 // WindowServer can consume resize-edge clicks before AppKit.
                 guard !self.panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation) else { return }
                 self.panel.orderOut(nil)
@@ -62,6 +65,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         } else {
             if !isFloating { positionAtStatusItem() }
             panel.makeKeyAndOrderFront(nil)
+            onShow?()
         }
     }
 
@@ -86,6 +90,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         panel.styleMask.remove(.resizable)
         positionAtStatusItem()
         panel.makeKeyAndOrderFront(nil)
+        onShow?()
     }
 
     func hide() { panel.orderOut(nil) }
@@ -146,7 +151,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        if !isDragging { panel.orderOut(nil) }
+        if !isDragging && !isFloating { panel.orderOut(nil) }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

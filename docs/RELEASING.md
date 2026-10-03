@@ -3,6 +3,30 @@
 Pushing a `v*` tag builds, signs, notarizes, and publishes a DMG to GitHub
 Releases (`.github/workflows/release.yml`).
 
+The release script bundles the complete non-system dylib dependency tree into
+`Contents/Frameworks` before signing. This includes indirect dependencies such
+as Homebrew's libpsl: a notarized app can still fail at launch if one of its
+libraries loads a dependency from the build machine's Homebrew installation.
+Bundled dependencies use paths relative to their loader and are signed with
+the app's identity. Library validation remains enabled.
+
+To package or check an unsigned local build without signing or installing it:
+
+```sh
+python3 scripts/bundle-dependencies.py /path/to/OpenOpal.app
+python3 scripts/bundle-dependencies.py /path/to/OpenOpal.app --validate-only
+python3 -m unittest discover -s scripts/tests -v
+```
+
+Packaging copies dylibs, leaving the original build/Homebrew libraries alone.
+It fails on missing dependencies or conflicting library filenames; rebuild
+with a consistent dependency set to resolve those errors. Validation inspects
+all Mach-O files, including the camera extension, and rejects unresolved
+`@rpath` loads and non-system dependencies outside the app. `sign.sh` runs that
+same read-only check before signing. Run packaging before signing, since
+rewriting a Mach-O file invalidates any existing signature. The packaging tests
+compile tiny Mach-O fixtures on macOS without launching the app or camera.
+
 ```sh
 git tag v0.1.0
 git push origin v0.1.0

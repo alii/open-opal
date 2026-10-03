@@ -45,6 +45,19 @@ hunter_config(
 EOF
 fi
 
+# First-generation C1s report 0.0.0. Only GetBootloaderVersion and UsbRomBoot
+# bypass the version gate for the RAM-only handoff; all other requests keep it.
+# Do not silently reuse an SDK containing the older, unrestricted exception.
+if grep -q "OPAL_C1_PATCH" "$SRC/src/device/DeviceBootloader.cpp"; then
+  echo "error: depthai-core contains the old unrestricted C1 patch." >&2
+  echo "Restore its two request-version checks to upstream $DEPTHAI_TAG, preserving other local changes, then rerun bootstrap." >&2
+  exit 1
+fi
+if ! grep -q "OPAL_C1_RAM_HANDOFF_PATCH" "$SRC/src/device/DeviceBootloader.cpp"; then
+  echo "==> patching depthai-core: allow only the 0.0.0 RAM handoff requests"
+  git -C "$SRC" apply "$ROOT/patches/depthai-bootloader-0.0.0.patch"
+fi
+
 echo "==> configuring (Hunter builds deps from source; first run takes a few minutes)"
 # CMake 4.x removed compatibility with pre-3.5 policies, which Hunter's own
 # nested cmake invocations still declare. The env var propagates into those

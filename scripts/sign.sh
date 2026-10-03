@@ -7,7 +7,12 @@ set -euo pipefail
 APP="${1:?usage: sign.sh /path/to/OpenOpal.app}"
 IDENTITY="${IDENTITY:-Developer ID Application: Alistair Smith (RD994J874S)}"
 EXT="$APP/Contents/Library/SystemExtensions/sh.alistair.open-opal.camera.systemextension"
+HELPER="$APP/Contents/Library/LoginItems/OpenOpalLauncher.app"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+echo "==> validating bundled dependencies"
+# No Homebrew/build-machine paths may survive into hardened-runtime signing.
+python3 "$ROOT/scripts/bundle-dependencies.py" "$APP" --validate-only
 
 echo "==> embedding provisioning profiles"
 # Restricted entitlements (system-extension.install) are only honored when a
@@ -25,6 +30,9 @@ echo "==> camera extension"
 codesign --force --timestamp --options runtime \
   --entitlements "$ROOT/Sources/OpenOpalCameraExtension/OpenOpalCameraExtension.entitlements" \
   --sign "$IDENTITY" "$EXT"
+
+echo "==> login helper"
+codesign --force --timestamp --options runtime --sign "$IDENTITY" "$HELPER"
 
 echo "==> app"
 codesign --force --timestamp --options runtime \
