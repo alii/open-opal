@@ -21,6 +21,21 @@ target_include_directories(OpalBridge PUBLIC
 
 target_link_libraries(OpalBridge PRIVATE depthai::core)
 
+# depthai already links libusb; the headers ship beside its installed config.
+# Needed to tell a camera running its stock firmware from one running someone
+# else's pipeline, which XLink state alone cannot express.
+target_include_directories(OpalBridge PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib/cmake/depthai/dependencies/include")
+
+# depthai links libusb privately and does not re-export it, so link the copy
+# bootstrap.sh stages beside it. The app bundles this dylib already.
+find_library(OPAL_LIBUSB usb-1.0
+    PATHS "${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib" NO_DEFAULT_PATH)
+if(NOT OPAL_LIBUSB)
+    message(FATAL_ERROR "libusb not found in vendor/install/lib; run scripts/bootstrap.sh")
+endif()
+target_link_libraries(OpalBridge PRIVATE "${OPAL_LIBUSB}")
+
 set_target_properties(OpalBridge PROPERTIES
     INSTALL_RPATH "@loader_path"
     BUILD_WITH_INSTALL_RPATH TRUE)
@@ -29,7 +44,7 @@ set_target_properties(OpalBridge PROPERTIES
 option(OPAL_BRIDGE_TEST "Build the bridge smoke test" OFF)
 if(OPAL_BRIDGE_TEST)
     add_executable(bridge_test test/bridge_test.c)
-    add_executable(region_test test/region_test.c)
+    add_executable(region_test ${CMAKE_CURRENT_LIST_DIR}/../../tools/probes/region_test.c)
     target_link_libraries(region_test PRIVATE OpalBridge)
     set_target_properties(region_test PROPERTIES INSTALL_RPATH "@executable_path;${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib" BUILD_WITH_INSTALL_RPATH TRUE)
     target_link_libraries(bridge_test PRIVATE OpalBridge)

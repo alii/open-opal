@@ -9,6 +9,8 @@
 #include <string>
 #include <thread>
 
+#include <libusb-1.0/libusb.h>
+
 namespace {
 
 std::mutex g_errMutex;
@@ -148,7 +150,8 @@ struct OpalDeviceHandle {
     OpalTelemetry       tel{};
 };
 
-// Defined below; used by the control thread in opal_open.
+// Both defined below.
+static bool looksLikeStockC1(const std::string& mxid);
 static bool buildDelta(const OpalControls& c, const OpalControls& prev, bool havePrev,
                        dai::CameraControl& ctrl);
 
@@ -172,9 +175,18 @@ int opal_list_devices(OpalDeviceInfo* out, int maxCount) {
             info.state  = mapState(d.state);
             // FLASH_BOOTED (stock UVC firmware) and UNBOOTED are both openable;
             // we reboot the device with our pipeline either way.
+            // X_LINK_BOOTED is the first-generation (IMX378) C1 running its
+            // flashed camera firmware. depthai's getAllAvailableDevices()
+            // filters that state out as "in use by someone else", which is why
+            // these cameras look invisible. They are not: prepareLegacyDevice()
+            // walks them to the ROM bootloader, after which they are ordinary
+            // unbooted devices.
+            // X_LINK_BOOTED equally describes a device running someone
+            // else's pipeline, so the descriptor decides rather than the state.
             info.usable = (d.state == X_LINK_FLASH_BOOTED ||
                            d.state == X_LINK_UNBOOTED ||
-                           d.state == X_LINK_BOOTLOADER);
+                           d.state == X_LINK_BOOTLOADER ||
+                           (d.state == X_LINK_BOOTED && looksLikeStockC1(d.getMxId())));
             out[n++] = info;
         }
         return n;
@@ -182,6 +194,149 @@ int opal_list_devices(OpalDeviceInfo* out, int maxCount) {
         setError(e.what());
         return 0;
     }
+}
+
+
+// Walk a first-generation C1 from its flashed camera firmware to the Myriad ROM
+// bootloader, leaving it in the ordinary X_LINK_UNBOOTED state depthai knows
+// how to boot. Opal's own app does exactly this on every launch:
+//
+//     f63b BOOTED  --0xF5/0x0DA1-->  f63c BOOTLOADER
+//                  --UsbRomBoot--->  2485 UNBOOTED
+//                  --firmware----->  running from RAM
+//
+// Two things make this easy to get wrong: the ROM window is only about two
+// seconds wide, and the device's USB address changes across each transition, so
+// every stage must re-enumerate rather than reuse a stale DeviceInfo. That
+// address change is why a naive attempt fails with X_LINK_DEVICE_NOT_FOUND.
+//
+// Nothing is written to flash. A power cycle restores the stock firmware.
+// Tell a first-generation C1 running its stock camera firmware from any other
+// DepthAI device that merely happens to be booted.
+//
+// This matters because X_LINK_BOOTED is not specific: it equally describes an
+// OAK running a pipeline that another application owns. Jumping one of those to
+// its bootloader would take someone else's camera out from under them.
+//
+// XLink state cannot express the difference, but the USB descriptor can. Stock
+// C1 firmware presents video and audio interfaces alongside the vendor bulk
+// endpoint; a running DepthAI pipeline presents the bulk endpoint alone.
+static bool looksLikeStockC1(const std::string& mxid) {
+    libusb_context* ctx = nullptr;
+    if(libusb_init(&ctx) != 0) return false;
+
+    libusb_device** list = nullptr;
+    ssize_t count = libusb_get_device_list(ctx, &list);
+    bool match = false;
+
+    for(ssize_t i = 0; i < count && !match; i++) {
+        libusb_device_descriptor desc{};
+        if(libusb_get_device_descriptor(list[i], &desc) != 0) continue;
+        if(desc.idVendor != 0x03E7) continue;
+
+        libusb_device_handle* handle = nullptr;
+        if(libusb_open(list[i], &handle) != 0) continue;
+
+        // The USB serial is the MxID, so this identifies the exact device
+        // rather than trusting position on the bus.
+        unsigned char serial[64] = {0};
+        if(desc.iSerialNumber &&
+           libusb_get_string_descriptor_ascii(handle, desc.iSerialNumber,
+                                              serial, sizeof(serial)) > 0 &&
+           mxid == reinterpret_cast<char*>(serial)) {
+            libusb_config_descriptor* cfg = nullptr;
+            if(libusb_get_active_config_descriptor(list[i], &cfg) == 0) {
+                bool video = false, audio = false;
+                for(uint8_t n = 0; n < cfg->bNumInterfaces; n++) {
+                    switch(cfg->interface[n].altsetting[0].bInterfaceClass) {
+                        case LIBUSB_CLASS_VIDEO: video = true; break;
+                        case LIBUSB_CLASS_AUDIO: audio = true; break;
+                        default: break;
+                    }
+                }
+                match = video && audio;
+                libusb_free_config_descriptor(cfg);
+            }
+        }
+        libusb_close(handle);
+    }
+
+    if(list) libusb_free_device_list(list, 1);
+    libusb_exit(ctx);
+    return match;
+}
+
+static bool findDeviceInState(XLinkDeviceState_t want, const std::string& mxid,
+                              dai::DeviceInfo& out, double timeoutSeconds) {
+    // An empty identity must never turn a targeted reconnect into discovery.
+    if(mxid.empty()) return false;
+    auto deadline = std::chrono::steady_clock::now()
+                  + std::chrono::milliseconds((long)(timeoutSeconds * 1000));
+    while(std::chrono::steady_clock::now() < deadline) {
+        // Re-enumerate every pass: the USB path is not stable across a reboot.
+        for(const auto& d : dai::XLinkConnection::getAllConnectedDevices()) {
+            if(d.state != want) continue;
+            if(d.getMxId() != mxid) continue;
+            out = d;
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }
+    return false;
+}
+
+static bool prepareLegacyDevice(const std::string& mxid, dai::DeviceInfo& unbooted) {
+    dai::DeviceInfo booted;
+    if(!findDeviceInState(X_LINK_BOOTED, mxid, booted, 1.0)) return false;
+
+    // Refuse to reboot anything that is not demonstrably a C1 on its stock
+    // firmware. A booted device may belong to another application, and taking
+    // that away would be considerably worse than declining to help.
+    if(!looksLikeStockC1(mxid)) {
+        setError("device " + mxid + " is booted but does not look like stock C1 "
+                 "firmware; refusing to reboot it");
+        return false;
+    }
+
+    bootLog("first-generation C1 in camera mode - walking it to the ROM bootloader");
+
+    // Stage 1: jump the running firmware into its DepthAI bootloader.
+    try {
+        dai::XLinkConnection::bootBootloader(booted);
+    } catch(const std::exception& e) {
+        // XLink ignores this control transfer's result too; the device leaves
+        // the bus either way. Only a missing device downstream is fatal.
+        bootLog(std::string("bootBootloader returned: ") + e.what());
+    }
+
+    dai::DeviceInfo bl;
+    if(!findDeviceInState(X_LINK_BOOTLOADER, mxid, bl, 20.0)) {
+        setError("camera never reached the bootloader after the jump packet");
+        return false;
+    }
+    bootLog("bootloader reached - requesting USB ROM boot");
+
+    // Stage 2: hand off to the Myriad ROM. These cameras report bootloader
+    // version 0.0.0. The SDK exception is limited to GetBootloaderVersion and
+    // UsbRomBoot, the only requests needed for this RAM-only handoff.
+    try {
+        dai::DeviceBootloader loader(bl, false);
+        loader.bootUsbRomBootloader();
+    } catch(const std::exception& e) {
+        setError(std::string("USB ROM boot failed: ") + e.what());
+        return false;
+    }
+
+    // Stage 3: catch the ROM only if it still reports the selected camera's ID.
+    // A sole unbooted device is not proof of identity: it could be unrelated.
+    // If the ROM changes or omits the ID, fail without uploading the pipeline.
+    if(!findDeviceInState(X_LINK_UNBOOTED, mxid, unbooted, 25.0)) {
+        setError("camera did not re-enumerate with its selected id; "
+                 "refusing to upload firmware to an unidentified device");
+        return false;
+    }
+    bootLog("ROM bootloader reached - handing off to depthai");
+    return true;
 }
 
 OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
@@ -293,7 +448,18 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
         bool found = false;
         try {
             if(mxid && mxid[0]) {
-                for(const auto& info : dai::Device::getAllAvailableDevices()) {
+                // A first-generation C1 sits in X_LINK_BOOTED, which
+                // getAllAvailableDevices() does not return. Walk it to the ROM
+                // bootloader first; after that it enumerates as an ordinary
+                // unbooted device and the normal path below picks it up.
+                dai::DeviceInfo prepared;
+                if(prepareLegacyDevice(std::string(mxid), prepared)) {
+                    bootLog("target: legacy C1 - booting firmware into VPU RAM");
+                    dev = std::make_unique<dai::Device>(pipeline, prepared, dai::UsbSpeed::SUPER_PLUS);
+                    found = true;
+                }
+                for(const auto& info : found ? std::vector<dai::DeviceInfo>{}
+                                             : dai::Device::getAllAvailableDevices()) {
                     if(info.getMxId() == std::string(mxid)) {
                         bootLog(std::string("target: mxid ") + mxid + " · resetting VPU, uploading firmware over XLink");
                         dev = std::make_unique<dai::Device>(pipeline, info, dai::UsbSpeed::SUPER_PLUS);
