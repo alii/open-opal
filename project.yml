@@ -79,6 +79,13 @@ targets:
         com.apple.security.application-groups:
           - group.sh.alistair.open-opal
     dependencies:
+      - target: OpenOpalLauncher
+        link: false
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/LoginItems
       - target: OpenOpalCameraExtension
         embed: true
         codeSign: true
@@ -127,6 +134,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources/OpenOpalCameraExtension
+      - path: Sources/Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: sh.alistair.open-opal.camera
@@ -170,3 +178,26 @@ targets:
         # A bare team-ID prefix is not enough.
         com.apple.security.application-groups:
           - group.sh.alistair.open-opal
+
+  OpenOpalLauncher:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/OpenOpalLauncher
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: sh.alistair.open-opal.launcher
+        PRODUCT_NAME: OpenOpalLauncher
+        SKIP_INSTALL: YES
+    info:
+      path: Sources/OpenOpalLauncher/Info.plist
+      properties:
+        CFBundleName: OpenOpal Launcher
+        CFBundleDisplayName: OpenOpal Launcher
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "26.0"
+        LSUIElement: true
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false

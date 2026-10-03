@@ -58,6 +58,22 @@ struct Inspector: View {
                 }
 
                 Section("Virtual Camera", icon: "video.badge.checkmark", in: glass) {
+                    if camera.autoLaunch.isIncludedInApp {
+                        Toggle("Start OpenOpal automatically", isOn: Binding(
+                            get: { camera.autoLaunch.isEnabled },
+                            set: { camera.autoLaunch.setEnabled($0) }))
+                            .disabled(camera.autoLaunch.isChanging)
+                        Note("A login helper opens OpenOpal when a video app uses “Open Opal Camera”.",
+                             tone: .hint)
+                        if camera.autoLaunch.status == .requiresApproval {
+                            Note("Allow OpenOpal Launcher in Login Items to enable automatic startup.", tone: .warning)
+                            Button("Open Login Items") { camera.autoLaunch.openLoginItems() }
+                                .buttonStyle(.glass)
+                        }
+                        if let error = camera.autoLaunch.error {
+                            Note(error, tone: .warning)
+                        }
+                    }
                     switch camera.installer.status {
                     case .installed:
                         if camera.feeder.connected {
