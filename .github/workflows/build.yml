@@ -1,0 +1,89 @@
+name: Build
+
+# The release workflow only runs on tags, so nothing checks a push or a pull
+# request. This does, and needs no secrets: the app is built unsigned.
+#
+# It covers more than "does it compile". bootstrap.sh applies the depthai
+# patch with `git apply`, which fails hard if the patch ever stops applying to
+# the pinned depthai tag — so an upstream change that breaks it shows up here
+# rather than on someone's machine.
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]   # tags are the release workflow's job
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to the same branch supersedes an in-flight run. These builds are
+  # slow and there is no value in finishing a stale one.
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # macOS 26 for Xcode 26, matching the release workflow. Bump both together.
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install cmake ninja xcodegen
+
+      # Same cache key as the release workflow, so the two share a store.
+      # Keyed on bootstrap.sh because that pins the depthai tag and now also
+      # carries the patch step.
+      - name: Cache depthai-core
+        id: cache-depthai
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.hunter
+            vendor/install
+          key: depthai-v2.30.0-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
+
+      - name: Build depthai-core
+        if: steps.cache-depthai.outputs.cache-hit != 'true'
+        run: ./scripts/bootstrap.sh
+
+      # The app bundles a Core ML depth model that Models/ does not carry -- it
+      # is gitignored at ~50MB. Cache it on the script's hash, since that pins
+      # which model and variant gets fetched.
+      - name: Cache the Core ML model
+        id: cache-models
+        uses: actions/cache@v4
+        with:
+          path: Models
+          key: models-${{ hashFiles('scripts/fetch-models.sh') }}
+
+      - name: Fetch the Core ML model
+        if: steps.cache-models.outputs.cache-hit != 'true'
+        run: ./scripts/fetch-models.sh
+
+      # Builds bridge_test and region_test, which the app target does not. They
+      # need real hardware to run, but compiling them keeps the test sources
+      # honest — a stale path here is exactly the bug this catches.
+      - name: Build the bridge test targets
+        run: |
+          cmake -S Sources/OpalBridge -B build/bridgetest -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPAL_BRIDGE_TEST=ON \
+            -Ddepthai_DIR="$PWD/vendor/install/lib/cmake/depthai"
+          cmake --build build/bridgetest
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      # Unsigned: signing needs secrets a fork will not have, and this job is
+      # about whether the code builds.
+      - name: Build the app
+        run: |
+          xcodebuild -project OpenOpal.xcodeproj -scheme OpenOpal \
+            -configuration Release -derivedDataPath build/DerivedData \
+            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO build

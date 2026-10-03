@@ -34,7 +34,7 @@ jobs:
           path: |
             ~/.hunter
             vendor/install
-          key: depthai-v2.30.0-${{ hashFiles('scripts/bootstrap.sh') }}
+          key: depthai-v2.30.0-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
 
       - name: Build depthai-core
         if: steps.cache-depthai.outputs.cache-hit != 'true'
