@@ -89,7 +89,11 @@ cmake --install "$BUILD"
 # so stage Hunter's copy into the install prefix. (Previously done by hand on
 # one machine, which is why clean checkouts — CI, fresh clones — couldn't link.)
 echo "==> staging libusb"
-LIBUSB=$(find "$HOME/.hunter" -name "libusb-1.0*.dylib" -type f 2>/dev/null | head -1)
+# Hunter keeps one install per toolchain, so take the one this build used —
+# not whichever the cache lists first, which may target a different macOS.
+XLINK_DIR=$(sed -n 's/^XLink_DIR:PATH=//p' "$BUILD/CMakeCache.txt")
+LIBUSB="${XLINK_DIR%/lib/cmake/XLink}/lib/libusb-1.0.dylib"
+[ -f "$LIBUSB" ] || LIBUSB=""
 if [ -n "$LIBUSB" ]; then
   cp "$LIBUSB" "$PREFIX/lib/libusb-1.0.dylib"
   echo "    $LIBUSB -> $PREFIX/lib/"
