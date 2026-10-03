@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
+# Must precede project(). Keep in step with project.yml.
+set(CMAKE_OSX_DEPLOYMENT_TARGET 14.0 CACHE STRING "Minimum macOS")
 project(OpalBridge LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)

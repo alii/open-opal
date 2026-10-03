@@ -56,7 +56,9 @@ secrets with `base64 -i <file>`.
 
 ## Runner
 
-The workflow uses `runs-on: macos-26` for Xcode 26 / the Liquid Glass SDK. If
-GitHub renames that image, update the label. The first run builds depthai-core
+The workflow uses `runs-on: macos-26` for Xcode 26 / the Liquid Glass SDK.
+Move it (and `build.yml`) to `macos-27` once GitHub offers that image. Builds
+target macOS 14 regardless of the runner, and `bundle-dependencies.py` fails
+the release if any bundled library needs a newer macOS than that. The first run builds depthai-core
 from source (~several minutes); it's cached afterward and only rebuilds when
-`scripts/bootstrap.sh` changes.
+`scripts/bootstrap.sh` or `patches/` change.

@@ -56,6 +56,24 @@ def inspect(path):
     return dependencies, rpaths, install_ids
 
 
+def minimum_os(path):
+    """The macOS a Mach-O binary was built to require, or None if unrecorded."""
+    command = None
+    for line in run("otool", "-l", str(path)).splitlines():
+        line = line.strip()
+        if line.startswith("cmd "):
+            command = line[4:]
+        elif command == "LC_BUILD_VERSION" and line.startswith("minos "):
+            return line.split()[1]
+        elif command == "LC_VERSION_MIN_MACOSX" and line.startswith("version "):
+            return line.split()[1]
+    return None
+
+
+def version_tuple(version):
+    return tuple(int(part) for part in version.split("."))
+
+
 def is_system(name):
     return name.startswith(("/usr/lib/", "/System/Library/"))
 
@@ -132,6 +150,17 @@ def process(app, validate_only=False):
             binaries.append(path.resolve())
     if not binaries:
         raise BundleError(f"No Mach-O binaries in {app}")
+    if validate_only:
+        # A library built on a newer Mac (Homebrew bottles, an unpinned SDK
+        # build) silently raises the app's real minimum macOS.
+        with (app / "Contents/Info.plist").open("rb") as stream:
+            declared = plistlib.load(stream).get("LSMinimumSystemVersion")
+        if declared:
+            for binary in binaries:
+                required = minimum_os(binary)
+                if required and version_tuple(required) > version_tuple(declared):
+                    raise BundleError(
+                        f"{binary} requires macOS {required}, but the app declares {declared}")
     if not validate_only:
         frameworks.mkdir(parents=True, exist_ok=True)
 

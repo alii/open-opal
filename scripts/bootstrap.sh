@@ -63,9 +63,14 @@ echo "==> configuring (Hunter builds deps from source; first run takes a few min
 # nested cmake invocations still declare. The env var propagates into those
 # nested calls; a -D flag on the outer command does not.
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
+# Pin the minimum macOS. Without it every library targets the OS that built it,
+# so a build on a newer Mac won't load on older ones. The env var reaches
+# Hunter's nested dependency builds too; keep it in step with project.yml.
+export MACOSX_DEPLOYMENT_TARGET=14.0
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=ON \
   -DDEPTHAI_BUILD_EXAMPLES=OFF \
@@ -84,7 +89,11 @@ cmake --install "$BUILD"
 # so stage Hunter's copy into the install prefix. (Previously done by hand on
 # one machine, which is why clean checkouts — CI, fresh clones — couldn't link.)
 echo "==> staging libusb"
-LIBUSB=$(find "$HOME/.hunter" -name "libusb-1.0*.dylib" -type f 2>/dev/null | head -1)
+# Hunter keeps one install per toolchain, so take the one this build used —
+# not whichever the cache lists first, which may target a different macOS.
+XLINK_DIR=$(sed -n 's/^XLink_DIR:PATH=//p' "$BUILD/CMakeCache.txt")
+LIBUSB="${XLINK_DIR%/lib/cmake/XLink}/lib/libusb-1.0.dylib"
+[ -f "$LIBUSB" ] || LIBUSB=""
 if [ -n "$LIBUSB" ]; then
   cp "$LIBUSB" "$PREFIX/lib/libusb-1.0.dylib"
   echo "    $LIBUSB -> $PREFIX/lib/"

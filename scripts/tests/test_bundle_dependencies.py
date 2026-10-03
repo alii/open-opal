@@ -125,6 +125,16 @@ class BundleTests(unittest.TestCase):
         with self.assertRaisesRegex(bundler.BundleError, "symlink escapes"):
             bundler.process(self.app)
 
+    def test_binary_newer_than_declared_minimum_rejected(self):
+        with (self.app / "Contents/Info.plist").open("wb") as stream:
+            plistlib.dump({"CFBundleExecutable": "OpenOpal",
+                           "LSMinimumSystemVersion": "14.0"}, stream)
+        self.compile(self.frameworks / "libnew.dylib", "int fn0(void) { return 0; }",
+                     "-Wl,-install_name,@rpath/libnew.dylib", "-mmacosx-version-min=15.0")
+        self.make_executable(self.frameworks / "libnew.dylib")
+        with self.assertRaisesRegex(bundler.BundleError, "requires macOS 15.0"):
+            bundler.process(self.app, validate_only=True)
+
 
 if __name__ == "__main__":
     unittest.main()
