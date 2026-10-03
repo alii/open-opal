@@ -157,12 +157,21 @@ final class OpalDevice {
         // a single attempt isn't enough — retry a few times before giving up.
         let args = OpenArgs(cfg: cfg, ctx: ctx)
 
+        let tuningBlob = Self.discoverTuningBlob()
+        if let tuningBlob { log.info("tuning blob: \(tuningBlob, privacy: .public)") }
+
         var opened: OpaquePointer?
         var lastError = ""
         for attempt in 1...4 {
             opened = await Task.detached(priority: .userInitiated) {
-                HandleBox(mxid.withCString {
-                    opal_open($0, args.cfg, opalFrameTrampoline, args.ctx)
+                // Both C strings must outlive the call, so the closures nest
+                // rather than letting a withCString pointer escape.
+                HandleBox(mxid.withCString { mx in
+                    withOptionalCString(tuningBlob) { blob in
+                        var cfg = args.cfg
+                        cfg.tuningBlobPath = blob
+                        return opal_open(mx, cfg, opalFrameTrampoline, args.ctx)
+                    }
                 })
             }.value.handle
             if opened != nil { break }
@@ -207,6 +216,44 @@ final class OpalDevice {
         disconnect()
         await connect(settings: settings)
         settings.coldDirty = false
+    }
+
+    /// An ISP tuning blob to load, or nil for DepthAI's defaults.
+    ///
+    /// The blob is the ISP's calibration for one sensor and lens — metering
+    /// curves, colour matrices, noise handling — and it is where most of the
+    /// difference in auto-exposure and auto-white-balance behaviour lives.
+    ///
+    /// Deliberately narrow. A blob fitted to one sensor is wrong for another,
+    /// and the sensor is not known until after the pipeline boots, so there is
+    /// no safe moment to guess. Rather than hunt for vendor files and pick by
+    /// filename — which hands an IMX582 owner the IMX378 calibration — this
+    /// reads only what you put here yourself:
+    ///
+    ///     ~/Library/Application Support/OpenOpal/tuning/
+    ///
+    /// One `.bin` is a clear instruction. Several is ambiguous, so the defaults
+    /// are used and the ambiguity is logged rather than resolved by guesswork.
+    static func discoverTuningBlob() -> String? {
+        let fm = FileManager.default
+        guard let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return nil }
+
+        let dir = support.appendingPathComponent("OpenOpal/tuning", isDirectory: true)
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return nil }
+
+        let blobs = names.filter { $0.hasSuffix(".bin") }.sorted()
+            .map { dir.appendingPathComponent($0).path }
+            .filter { fm.isReadableFile(atPath: $0) }
+
+        switch blobs.count {
+        case 0: return nil
+        case 1: return blobs[0]
+        default:
+            Logger(subsystem: "com.openopal", category: "device").warning(
+                "\(blobs.count) tuning blobs in \(dir.path, privacy: .public); cannot tell which matches this camera, so using DepthAI defaults. Leave one.")
+            return nil
+        }
     }
 
     // MARK: - Controls
@@ -481,4 +528,12 @@ private func opalFrameTrampoline(y: UnsafePointer<UInt8>?, yStride: Int,
     let sink = Unmanaged<FrameSink>.fromOpaque(ctx).takeUnretainedValue()
     sink.ingest(y: y, yStride: yStride, uv: uv, uvStride: uvStride,
                 width: Int(width), height: Int(height), latencyMs: latencyMs)
+}
+
+/// `withCString` for an optional path: passes NULL through rather than making
+/// every call site duplicate itself for the nil case.
+private func withOptionalCString<R>(_ s: String?,
+                                    _ body: (UnsafePointer<CChar>?) -> R) -> R {
+    guard let s else { return body(nil) }
+    return s.withCString { body($0) }
 }

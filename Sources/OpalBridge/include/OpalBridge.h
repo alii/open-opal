@@ -66,6 +66,18 @@ typedef struct {
     // ourselves. The ISP does the rotation for free, which also means the fix
     // lands upstream of everything: preview, effects, and the virtual camera.
     OpalOrientation orientation;
+
+    // Absolute path to a DepthAI camera tuning blob, or NULL for the built-in
+    // defaults.
+    //
+    // The tuning blob is the ISP's calibration for a specific sensor and lens:
+    // metering curves, colour matrices, noise handling. DepthAI ships a generic
+    // one; the camera vendor ships a fitted one. Auto-exposure and
+    // auto-white-balance behaviour comes almost entirely from this file.
+    //
+    // Not bundled: these are proprietary files belonging to the camera vendor.
+    // Point this at one from an installation you already have.
+    const char* tuningBlobPath;
 } OpalPipelineConfig;
 
 // ---------------------------------------------------------------------------

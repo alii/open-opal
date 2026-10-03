@@ -189,6 +189,22 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
     try {
         dai::Pipeline pipeline;
 
+        // Load a vendor tuning blob if one was supplied. This governs the ISP's
+        // metering curves, colour matrices and noise handling — which is to say
+        // it governs how auto-exposure and auto-white-balance actually behave.
+        // DepthAI's built-in defaults are generic across every sensor it
+        // supports; a blob fitted to this sensor and lens is a different picture.
+        if(cfg.tuningBlobPath && cfg.tuningBlobPath[0]) {
+            try {
+                pipeline.setCameraTuningBlobPath(dai::Path(cfg.tuningBlobPath));
+                bootLog(std::string("camera tuning blob: ") + cfg.tuningBlobPath);
+            } catch(const std::exception& e) {
+                // A bad path should not cost the user their camera; fall back to
+                // the defaults and say so.
+                bootLog(std::string("tuning blob ignored (") + e.what() + ") — using defaults");
+            }
+        }
+
         auto cam = pipeline.create<dai::node::ColorCamera>();
         cam->setBoardSocket(dai::CameraBoardSocket::CAM_A);
         // Always 4K sensor mode — it's the IMX582's smallest. Scale on the ISP.
