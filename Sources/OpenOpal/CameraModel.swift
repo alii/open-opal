@@ -166,7 +166,12 @@ final class CameraModel {
 
     /// Send hot settings to the camera. Cheap — safe to call on every slider tick.
     /// The bridge coalesces and diffs, so nothing here blocks on USB.
-    func push() { device.apply(settings) }
+    func push() {
+        // Clear immediately, even if manual focus is turned off again before
+        // the next subject analysis arrives.
+        if settings.manualFocus { resetFocusTracking() }
+        device.apply(settings)
+    }
 
     /// Bring the renderer in line with the settings: mask quality, and whether the
     /// depth model needs to exist at all.

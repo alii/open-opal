@@ -113,7 +113,7 @@ typedef struct {
     bool     manualFocus;
     int32_t  lensPosition;      // 0..255
 
-    // Clamp where continuous autofocus is allowed to hunt, in the same 0..255
+    // Clamp where autofocus is allowed to hunt, in the same 0..255
     // lens-position space. A desk setup occupies a narrow band of that travel,
     // so letting AF search the whole range means it repeatedly racks past you
     // to find the far wall.

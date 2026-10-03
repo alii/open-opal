@@ -40,15 +40,25 @@ set_target_properties(OpalBridge PROPERTIES
     INSTALL_RPATH "@loader_path"
     BUILD_WITH_INSTALL_RPATH TRUE)
 
-# Optional smoke test: exercises the real camera end-to-end.
-option(OPAL_BRIDGE_TEST "Build the bridge smoke test" OFF)
+# Optional bridge tests: hardware smoke tests and offline control regressions.
+option(OPAL_BRIDGE_TEST "Build the bridge tests" OFF)
 if(OPAL_BRIDGE_TEST)
     add_executable(bridge_test test/bridge_test.c)
-    add_executable(region_test ${CMAKE_CURRENT_LIST_DIR}/../../tools/probes/region_test.c)
+    add_executable(region_test "${CMAKE_CURRENT_LIST_DIR}/../../tools/probes/region_test.c")
     target_link_libraries(region_test PRIVATE OpalBridge)
     set_target_properties(region_test PROPERTIES INSTALL_RPATH "@executable_path;${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib" BUILD_WITH_INSTALL_RPATH TRUE)
     target_link_libraries(bridge_test PRIVATE OpalBridge)
     set_target_properties(bridge_test PROPERTIES
         INSTALL_RPATH "@executable_path;${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib"
         BUILD_WITH_INSTALL_RPATH TRUE)
+
+    # Offline regressions: serialize real commands without opening hardware.
+    enable_testing()
+    add_executable(control_delta_test test/control_delta_test.cpp)
+    target_include_directories(control_delta_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
+    target_link_libraries(control_delta_test PRIVATE depthai::core)
+    set_target_properties(control_delta_test PROPERTIES
+        INSTALL_RPATH "${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE)
+    add_test(NAME control_delta COMMAND control_delta_test)
 endif()
