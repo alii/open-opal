@@ -32,6 +32,9 @@ animations.
 The virtual camera only installs from a signed build in /Applications; see
 [docs/SIGNING.md](docs/SIGNING.md). The app itself runs fine unsigned.
 
+Bootstrap disables network-camera discovery and connections inside DepthAI.
+The C1 uses USB only. Rebuild the SDK and app to update existing copies.
+
 ### First-generation C1s
 
 First-generation IMX378 C1s use a RAM-only bootloader handoff. The pinned
@@ -62,6 +65,13 @@ cmake -S Sources/OpalBridge -B build/control-tests \
   -DOPAL_BRIDGE_TEST=ON
 cmake --build build/control-tests --target control_delta_test
 ctest --test-dir build/control-tests -R '^control_delta$' --output-on-failure
+```
+
+Check missing-camera discovery without accessing hardware or sending packets:
+
+```sh
+cmake --build build/control-tests --target usb_only_test
+ctest --test-dir build/control-tests -R '^usb_only$' --output-on-failure
 ```
 
 ## The hardware

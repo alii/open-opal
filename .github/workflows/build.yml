@@ -76,6 +76,9 @@ jobs:
             -Ddepthai_DIR="$PWD/vendor/install/lib/cmake/depthai"
           cmake --build build/bridgetest
 
+      - name: Check USB-only discovery without a camera
+        run: ctest --test-dir build/bridgetest -R '^usb_only$' --output-on-failure
+
       - name: Generate the Xcode project
         run: xcodegen generate
 

@@ -1,0 +1,23 @@
+diff --git a/src/utility/Initialization.cpp b/src/utility/Initialization.cpp
+--- a/src/utility/Initialization.cpp
++++ b/src/utility/Initialization.cpp
+@@ -19,6 +19,8 @@
+ #include "spdlog/spdlog.h"
+ #include "utility/Logging.hpp"
+ extern "C" {
+ #include "XLink/XLinkLog.h"
++// The pinned XLink library provides this internal protocol setter.
++void xlinkSetProtocolInitialized(XLinkProtocol_t protocol, int initialized);
+ }
+ 
+@@ -119,6 +121,10 @@ bool initialize(const char* additionalInfo, bool installSignalHandler, void* javavm
+             throw std::runtime_error(errorMsg);
+         }
+ 
++        // OPAL_C1_USB_ONLY_PATCH: disable LAN discovery and connections,
++        // including internal reconnect searches that request any protocol.
++        xlinkSetProtocolInitialized(X_LINK_TCP_IP, 0);
++
+         // Check that USB protocol is available, IFF libusb is enabled
+ #ifdef DEPTHAI_ENABLE_LIBUSB
+         if(!XLinkIsProtocolInitialized(X_LINK_USB_VSC)) {
