@@ -16,11 +16,10 @@ namespace {
 std::mutex g_errMutex;
 std::string g_lastError;
 
-/// depthai also hunts for PoE devices over the local network, which makes macOS
-/// pop a "wants to find devices on your local network" prompt the first time the
-/// app runs. The C1 is USB-only, so restrict discovery and skip the prompt.
+// Keep discovery on USB even if the parent process selected another protocol.
+// bootstrap.sh also disables TCP/IP inside the SDK for its internal reconnects.
 struct UsbOnlyInit {
-    UsbOnlyInit() { setenv("DEPTHAI_PROTOCOL", "usb", /*overwrite=*/0); }
+    UsbOnlyInit() { setenv("DEPTHAI_PROTOCOL", "usb", /*overwrite=*/1); }
 };
 const UsbOnlyInit g_usbOnly;
 

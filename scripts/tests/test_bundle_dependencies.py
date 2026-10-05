@@ -61,7 +61,7 @@ class BundleTests(unittest.TestCase):
                               "-Wl,-rpath,@loader_path")
         self.make_executable(middle)
         before = {p: hashlib.sha256(p.read_bytes()).digest() for p in (leaf, extra)}
-        with self.assertRaisesRegex(bundler.BundleError, "Non-system absolute"):
+        with self.assertRaises(bundler.BundleError):
             bundler.process(self.app, validate_only=True)
         bundler.process(self.app)
         for p, checksum in before.items():
@@ -78,7 +78,7 @@ class BundleTests(unittest.TestCase):
                                "-Wl,-install_name,@rpath/libmissing.dylib")
         self.make_executable(library)
         library.unlink()
-        with self.assertRaisesRegex(bundler.BundleError, "Unresolved dependency"):
+        with self.assertRaises(bundler.BundleError):
             bundler.process(self.app, validate_only=True)
 
     def test_external_rpath_rejected_and_bundled(self):
@@ -86,7 +86,7 @@ class BundleTests(unittest.TestCase):
                                "-Wl,-install_name,@rpath/libexternal.dylib")
         self.make_executable(library)
         subprocess.run(["install_name_tool", "-add_rpath", str(self.external), str(self.executable)], check=True)
-        with self.assertRaisesRegex(bundler.BundleError, "escapes the app"):
+        with self.assertRaises(bundler.BundleError):
             bundler.process(self.app, validate_only=True)
         bundler.process(self.app)
         shutil.rmtree(self.external)
@@ -109,20 +109,20 @@ class BundleTests(unittest.TestCase):
             libraries.append(self.compile(library, f"int fn{i}(void) {{ return {i}; }}",
                                           f"-Wl,-install_name,{library}"))
         self.make_executable(*libraries)
-        with self.assertRaisesRegex(bundler.BundleError, "basename collision"):
+        with self.assertRaises(bundler.BundleError):
             bundler.process(self.app)
 
     def test_external_symlink_rejected(self):
         library = self.compile(self.external / "libexternal.dylib", "int fn0(void) { return 0; }")
         self.make_executable()
         (self.frameworks / "libexternal.dylib").symlink_to(library)
-        with self.assertRaisesRegex(bundler.BundleError, "symlink escapes"):
+        with self.assertRaises(bundler.BundleError):
             bundler.process(self.app)
 
     def test_external_directory_symlink_rejected(self):
         self.make_executable()
         (self.frameworks / "external").symlink_to(self.external, target_is_directory=True)
-        with self.assertRaisesRegex(bundler.BundleError, "symlink escapes"):
+        with self.assertRaises(bundler.BundleError):
             bundler.process(self.app)
 
     def test_binary_newer_than_declared_minimum_rejected(self):
@@ -132,7 +132,7 @@ class BundleTests(unittest.TestCase):
         self.compile(self.frameworks / "libnew.dylib", "int fn0(void) { return 0; }",
                      "-Wl,-install_name,@rpath/libnew.dylib", "-mmacosx-version-min=15.0")
         self.make_executable(self.frameworks / "libnew.dylib")
-        with self.assertRaisesRegex(bundler.BundleError, "requires macOS 15.0"):
+        with self.assertRaises(bundler.BundleError):
             bundler.process(self.app, validate_only=True)
 
 

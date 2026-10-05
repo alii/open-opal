@@ -76,6 +76,9 @@ jobs:
             -Ddepthai_DIR="$PWD/vendor/install/lib/cmake/depthai"
           cmake --build build/bridgetest
 
+      - name: Run camera-free bridge regressions
+        run: ctest --test-dir build/bridgetest --output-on-failure
+
       - name: Generate the Xcode project
         run: xcodegen generate
 

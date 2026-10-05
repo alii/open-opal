@@ -32,6 +32,9 @@ animations.
 The virtual camera only installs from a signed build in /Applications; see
 [docs/SIGNING.md](docs/SIGNING.md). The app itself runs fine unsigned.
 
+Bootstrap disables network-camera discovery and connections inside DepthAI.
+The C1 uses USB only. Rebuild the SDK and app to update existing copies.
+
 ### First-generation C1s
 
 First-generation IMX378 C1s use a RAM-only bootloader handoff. The pinned
@@ -52,16 +55,17 @@ linking DepthAI or accessing USB:
 python3 -m unittest discover -s scripts/tests -p 'test_boot_safety.py'
 ```
 
-The autofocus control regressions are offline: they inspect real serialized
-DepthAI commands without enumerating or opening a camera. Enable the bridge test
-targets, but build and run only the offline control test as shown below. Do not
-run `bridge_test` or `region_test`: those access the camera.
+The native regressions inspect serialized autofocus commands and check USB-only
+discovery. Discovery hides USB devices and blocks Internet socket calls. It
+calibrates socket observation before checking for zero discovery attempts.
+CI runs both regressions. Do not run `bridge_test` or `region_test` without a
+camera: those are manual hardware probes.
 
 ```sh
 cmake -S Sources/OpalBridge -B build/control-tests \
   -DOPAL_BRIDGE_TEST=ON
-cmake --build build/control-tests --target control_delta_test
-ctest --test-dir build/control-tests -R '^control_delta$' --output-on-failure
+cmake --build build/control-tests --target control_delta_test usb_only_test
+ctest --test-dir build/control-tests --output-on-failure
 ```
 
 ## The hardware

@@ -58,6 +58,12 @@ if ! grep -q "OPAL_C1_RAM_HANDOFF_PATCH" "$SRC/src/device/DeviceBootloader.cpp";
   git -C "$SRC" apply "$ROOT/patches/depthai-bootloader-0.0.0.patch"
 fi
 
+# The C1 has no network transport. Disable it before SDK discovery and reconnects.
+if ! grep -q "OPAL_C1_USB_ONLY_PATCH" "$SRC/src/utility/Initialization.cpp"; then
+  echo "==> patching depthai-core: disable TCP/IP discovery and connections"
+  git -C "$SRC" apply "$ROOT/patches/depthai-usb-only.patch"
+fi
+
 echo "==> configuring (Hunter builds deps from source; first run takes a few minutes)"
 # CMake 4.x removed compatibility with pre-3.5 policies, which Hunter's own
 # nested cmake invocations still declare. The env var propagates into those
