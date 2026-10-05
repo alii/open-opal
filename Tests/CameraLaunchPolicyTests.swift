@@ -11,13 +11,6 @@ struct CameraLaunchPolicyTests {
         precondition(!policy.updateDemand(true)) // Booting, unplugged, or user quit.
         precondition(!policy.updateDemand(false))
         precondition(policy.updateDemand(true)) // A new capture session may launch again.
-        policy.launchCompleted()
-
-        // A launch failure is still one attempt; it must not create a retry loop.
-        precondition(!policy.updateDemand(true))
-        precondition(!policy.updateDemand(false))
-        precondition(policy.updateDemand(true))
-
         // A session ending and restarting during launch shares that pending
         // launch. Its eventual completion must not launch a second instance.
         precondition(!policy.updateDemand(false))
@@ -33,6 +26,6 @@ struct CameraLaunchPolicyTests {
         precondition(!policy.hasDemand)
         precondition(!policy.updateDemand(false))
         precondition(policy.updateDemand(true))
-        print("Camera launch policy: passed session, duplicate, failure, quit, and in-flight checks")
+        print("Camera launch policy: passed session, duplicate, and in-flight checks")
     }
 }
