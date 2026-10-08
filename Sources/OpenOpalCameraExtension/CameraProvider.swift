@@ -37,8 +37,9 @@ final class CameraProviderSource: NSObject, CMIOExtensionProviderSource {
 
     init(clientQueue: DispatchQueue?) {
         super.init()
-        provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
-        deviceSource = CameraDeviceSource()
+        let queue = DispatchQueue(label: "com.openopal.camera.clients", target: clientQueue)
+        provider = CMIOExtensionProvider(source: self, clientQueue: queue)
+        deviceSource = CameraDeviceSource(clientQueue: queue)
         do {
             try provider.addDevice(deviceSource.device)
         } catch {
@@ -47,7 +48,9 @@ final class CameraProviderSource: NSObject, CMIOExtensionProviderSource {
     }
 
     func connect(to client: CMIOExtensionClient) throws {}
-    func disconnect(from client: CMIOExtensionClient) {}
+    func disconnect(from client: CMIOExtensionClient) {
+        deviceSource.sinkStreamSource.disconnect(client)
+    }
 
     var availableProperties: Set<CMIOExtensionProperty> {
         [.providerManufacturer, .providerName]
@@ -73,6 +76,7 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var sinkStream: CMIOExtensionStream!
     fileprivate var sourceStreamSource: SourceStreamSource!
     fileprivate var sinkStreamSource: SinkStreamSource!
+    fileprivate let clientQueue: DispatchQueue
 
     private let format: CMIOExtensionStreamFormat
     private let videoDescription: CMFormatDescription
@@ -89,7 +93,8 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var lastSinkFrameAt: CFAbsoluteTime = 0
     private var streamingCounter = 0
 
-    override init() {
+    init(clientQueue: DispatchQueue) {
+        self.clientQueue = clientQueue
         var desc: CMFormatDescription!
         CMVideoFormatDescriptionCreate(
             allocator: kCFAllocatorDefault,
@@ -279,10 +284,16 @@ fileprivate final class SourceStreamSource: NSObject, CMIOExtensionStreamSource 
 
 // MARK: - Sink stream (what the app feeds)
 
-fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource {
+fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource, @unchecked Sendable {
     private let format: CMIOExtensionStreamFormat
     private unowned let deviceSource: CameraDeviceSource
     private var client: CMIOExtensionClient?
+    private let authorizer = SinkClientAuthorizer()
+    private var isStreaming = false
+
+    private struct ReceivedSample: @unchecked Sendable {
+        let buffer: CMSampleBuffer?
+    }
 
     init(format: CMIOExtensionStreamFormat, device: CameraDeviceSource) {
         self.format = format
@@ -315,45 +326,57 @@ fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource {
     func setStreamProperties(_ streamProperties: CMIOExtensionStreamProperties) throws {}
 
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
+        guard authorizer?.isAuthorized(signingID: client.signingID, pid: client.pid) == true,
+              self.client == nil || self.client?.clientID == client.clientID else { return false }
         self.client = client
         return true
     }
 
     func startStream() throws {
-        guard let client else { return }
+        guard let client, !isStreaming else { return }
+        isStreaming = true
         consumeNext(from: client)
     }
 
     func stopStream() throws {
+        isStreaming = false
         client = nil
     }
 
-    /// Pull-driven: consume one buffer, forward it, ask for the next. The
-    /// recursion is bounded by the sink's queue depth.
+    func disconnect(_ disconnectedClient: CMIOExtensionClient) {
+        guard client?.clientID == disconnectedClient.clientID else { return }
+        isStreaming = false
+        client = nil
+    }
+
     private func consumeNext(from client: CMIOExtensionClient) {
-        deviceSource.sinkStream(consumeFrom: client) { [weak self] again in
-            guard let self, again, self.client != nil else { return }
-            self.consumeNext(from: client)
+        guard let stream = deviceSource.sinkStreamValue else { return }
+        let clientID = client.clientID
+        let queue = deviceSource.clientQueue
+        stream.consumeSampleBuffer(from: client) { [weak self] sample, sequence, _, _, error in
+            let received = ReceivedSample(buffer: sample)
+            let succeeded = error == nil
+            queue.async { [weak self] in
+                guard let self, self.isStreaming,
+                      let currentClient = self.client, currentClient.clientID == clientID else { return }
+                guard succeeded else {
+                    self.isStreaming = false
+                    self.client = nil
+                    return
+                }
+                if let sample = received.buffer,
+                   let hostTime = self.deviceSource.forwardToSource(sample) {
+                    self.deviceSource.sinkStreamValue?.notifyScheduledOutputChanged(
+                        CMIOExtensionScheduledOutput(sequenceNumber: sequence,
+                                                     hostTimeInNanoseconds: hostTime))
+                }
+                self.consumeNext(from: currentClient)
+            }
         }
     }
 }
 
 extension CameraDeviceSource {
-    /// Bridges the sink's consume loop to the forwarding path. Separated so the
-    /// stream source doesn't need to reach into the device's stream objects.
-    fileprivate func sinkStream(consumeFrom client: CMIOExtensionClient,
-                                completion: @escaping (Bool) -> Void) {
-        guard let stream = sinkStreamValue else { completion(false); return }
-        stream.consumeSampleBuffer(from: client) { [weak self] sbuf, seq, _, hasMore, err in
-            if let sbuf, err == nil {
-                self?.forwardToSource(sbuf)
-                stream.notifyScheduledOutputChanged(CMIOExtensionScheduledOutput(
-                    sequenceNumber: seq,
-                    hostTimeInNanoseconds: UInt64(sbuf.presentationTimeStamp.seconds * 1e9)))
-            }
-            completion(err == nil)
-        }
-    }
 
     fileprivate var sinkStreamValue: CMIOExtensionStream? {
         device.streams.first { $0.streamID == kSinkStreamUUID }
