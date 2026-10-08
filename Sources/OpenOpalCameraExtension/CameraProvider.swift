@@ -289,7 +289,7 @@ fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource, @
     private unowned let deviceSource: CameraDeviceSource
     private var client: CMIOExtensionClient?
     private let authorizer = SinkClientAuthorizer()
-    private var isStreaming = false
+    private var session = SinkSession()
 
     private struct ReceivedSample: @unchecked Sendable {
         let buffer: CMSampleBuffer?
@@ -327,29 +327,28 @@ fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource, @
 
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
         guard authorizer?.isAuthorized(signingID: client.signingID, pid: client.pid) == true,
-              self.client == nil || self.client?.clientID == client.clientID else { return false }
+              session.authorize(client.clientID) else { return false }
         self.client = client
         return true
     }
 
     func startStream() throws {
-        guard let client, !isStreaming else { return }
-        isStreaming = true
-        consumeNext(from: client)
+        guard let client, let generation = session.start() else { return }
+        consumeNext(from: client, generation: generation)
     }
 
     func stopStream() throws {
-        isStreaming = false
+        session.stop()
         client = nil
     }
 
     func disconnect(_ disconnectedClient: CMIOExtensionClient) {
-        guard client?.clientID == disconnectedClient.clientID else { return }
-        isStreaming = false
+        guard session.clientID == disconnectedClient.clientID else { return }
+        session.stop()
         client = nil
     }
 
-    private func consumeNext(from client: CMIOExtensionClient) {
+    private func consumeNext(from client: CMIOExtensionClient, generation: UInt64) {
         guard let stream = deviceSource.sinkStreamValue else { return }
         let clientID = client.clientID
         let queue = deviceSource.clientQueue
@@ -357,10 +356,10 @@ fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource, @
             let received = ReceivedSample(buffer: sample)
             let succeeded = error == nil
             queue.async { [weak self] in
-                guard let self, self.isStreaming,
-                      let currentClient = self.client, currentClient.clientID == clientID else { return }
+                guard let self, self.session.accepts(clientID, generation: generation),
+                      let currentClient = self.client else { return }
                 guard succeeded else {
-                    self.isStreaming = false
+                    self.session.stop()
                     self.client = nil
                     return
                 }
@@ -370,7 +369,7 @@ fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource, @
                         CMIOExtensionScheduledOutput(sequenceNumber: sequence,
                                                      hostTimeInNanoseconds: hostTime))
                 }
-                self.consumeNext(from: currentClient)
+                self.consumeNext(from: currentClient, generation: generation)
             }
         }
     }

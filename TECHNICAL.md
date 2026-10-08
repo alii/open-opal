@@ -178,6 +178,7 @@ The feeder uses the device's output scope and playback stream. The capture
 stream serves camera clients and is not a queue for sending our frames.
 
 Invalid sink timestamps are dropped. Only this team's signed host may produce frames.
+Stops discard pending callbacks.
 **Start OpenOpal automatically** registers a small login helper that listens
 for capture requests on "Open Opal Camera" and opens OpenOpal without taking
 focus. It does not open the camera or process video. If macOS asks, allow
