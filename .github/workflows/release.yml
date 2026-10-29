@@ -85,6 +85,8 @@ jobs:
         run: ./scripts/release.sh
 
       - name: Package DMG
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           APP="build/DerivedData/Build/Products/Release/OpenOpal.app"
           create-dmg \
@@ -94,8 +96,8 @@ jobs:
             --icon "OpenOpal.app" 150 190 \
             --app-drop-link 390 190 \
             --no-internet-enable \
-            "OpenOpal-${{ github.ref_name }}.dmg" "$APP" || \
-          create-dmg "OpenOpal-${{ github.ref_name }}.dmg" "$APP"
+            "OpenOpal-$RELEASE_TAG.dmg" "$APP" || \
+          create-dmg "OpenOpal-$RELEASE_TAG.dmg" "$APP"
 
       # A DMG signed and notarized inside doesn't carry its own ticket; notarize
       # and staple the DMG itself so Gatekeeper is happy on first open.
@@ -104,8 +106,9 @@ jobs:
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          DMG="OpenOpal-${{ github.ref_name }}.dmg"
+          DMG="OpenOpal-$RELEASE_TAG.dmg"
           xcrun notarytool submit "$DMG" \
             --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" \
             --password "$NOTARY_PASSWORD" --wait

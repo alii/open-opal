@@ -32,6 +32,26 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+## Model downloads
+
+`fetch-models.sh` downloads each package member to its own sibling temporary
+file. Only a successful, nonempty download replaces the cached member, so a
+failed or interrupted download is fetched again on the next run. Exit, interrupt,
+and termination traps remove only the temporary file owned by that run.
+
+## Compiled model publication
+
+Compilation writes into a unique staging directory beside the published model.
+On macOS, a small native helper uses `renamex_np(RENAME_SWAP)` to exchange the
+complete old and new directories in one operation. The published path never
+disappears during replacement, and compile or exchange failures keep the old
+model. A first install renames the complete staged model into place.
+
+Normal exits and catchable interruptions remove this run's staging directory.
+`SIGKILL` cannot run cleanup, so it may leave a `.compile.*` directory behind,
+but the published path still contains the complete old or new model. Later runs
+use their own staging directories and do not remove another run's files.
+
 ## One-time: repository secrets
 
 The CI can't sign or notarize without these. Add them under
@@ -62,3 +82,15 @@ target macOS 14 regardless of the runner, and `bundle-dependencies.py` fails
 the release if any bundled library needs a newer macOS than that. The first run builds depthai-core
 from source (~several minutes); it's cached afterward and only rebuilds when
 `scripts/bootstrap.sh` or `patches/` change.
+
+## Release names
+
+Packaging and notarization receive the tag through the `RELEASE_TAG` environment
+variable and quote it as filename data. Tags are never inserted into shell
+source: a valid Git tag can contain shell command substitution. The release
+action's `files` input remains data, not shell code.
+
+The offline release-name tests run with
+`python3 -m unittest discover -s scripts/tests -p test_release_names.py -v`.
+They execute the workflow's shell steps using local DMG and notary fixtures,
+including tags containing shell syntax. They do not sign or notarize artifacts.
