@@ -35,6 +35,8 @@ The virtual camera only installs from a signed build in /Applications; see
 Bootstrap disables network-camera discovery and connections inside DepthAI.
 The C1 uses USB only. Rebuild the SDK and app to update existing copies.
 
+Bootstrap pairs curl's TLS headers with Hunter's libraries, not Homebrew's.
+
 ### First-generation C1s
 
 First-generation IMX378 C1s use a RAM-only bootloader handoff. The pinned
@@ -66,6 +68,16 @@ cmake -S Sources/OpalBridge -B build/control-tests \
   -DOPAL_BRIDGE_TEST=ON
 cmake --build build/control-tests --target control_delta_test usb_only_test
 ctest --test-dir build/control-tests --output-on-failure
+```
+
+The production Metal renderer has a separate camera-free check on Apple silicon.
+It checks completed GPU pixels shared by preview and sink, retained output,
+bounded storage, analysis retention through GPU completion, exact-frame pairing,
+stale capture/mode rejection, temporal history and its reset behavior, and
+recovery after readers release their frames:
+
+```sh
+./scripts/check-render.sh
 ```
 
 ## The hardware
@@ -108,6 +120,9 @@ report the selected camera's MxID. If that ID disappears or changes, Open Opal
 fails safely without uploading the pipeline, even if only one unbooted device
 is attached. A USB address change is allowed; an unidentified device is not.
 
+Boots acknowledge captured settings only after success. Failed boots keep changes pending.
+Frame width and height change together under one lock.
+
 ```
 Myriad X (IMX582)
   ColorCamera ── ISP downscale ── NV12 ──► XLink/USB ──► OpalBridge (C shim over depthai-core)
@@ -120,12 +135,34 @@ Myriad X (IMX582)
                                  SwiftUI preview
 ```
 
-The background blur uses Vision person segmentation, computed for the same
-frame it masks (several frames are analysed concurrently to hold 30 fps),
-then blurred in linear light so highlights bloom instead of greying out. An
+The background blur uses Vision person segmentation. Synchronous bokeh pairs
+analysis with the exact input frame; asynchronous mode reuses the latest current
+analysis without waiting for inference. Frames are blurred in linear light so
+highlights bloom instead of greying out. An
 optional depth-graded mode uses
 [Depth Anything V2](https://huggingface.co/apple/coreml-depth-anything-v2-small)
 for distance-based falloff.
+
+Depth analysis runs one inference at a time, including switches between
+background and frame-paired analysis. Matte quality changes take effect when
+an idle analysis lane starts its next frame, not during a running Vision request.
+
+Preview and virtual-camera consumers retain the same completed render output.
+Later frames, including a resolution change, cannot overwrite pixels still
+owned by a reader. When all output slots are retained, rendering drops a frame
+instead of recycling live storage.
+
+Matte and depth results keep their storage until every analysis or GPU reader
+finishes. Capture resets and sync-mode changes reject earlier results and
+subject callbacks; they do not recycle a lane while Vision is still using it.
+Synchronous rendering rejects analysis for any other input buffer rather than
+silently falling back to the latest asynchronous mask.
+
+Temporal smoothing reads the previous matte without changing it. A fresh
+capture, resolution change, analysis-mode change, or interrupted bokeh path
+starts from the current matte instead of blending with old or uninitialized
+history. The check compares GPU history pixels and fresh-versus-warm rendering,
+then checks that capture, mode, and resolution resets match a fresh renderer.
 
 ### Autofocus
 
@@ -140,6 +177,11 @@ changing autofocus mode, or focusing on a region. Turning the limit off restores
 the full 0–255 range. Exposure and other unrelated control changes do not restart
 autofocus. Entering manual focus clears the tracking history immediately, so
 returning to automatic focus can refocus even if the person's size has not changed.
+
+Reconnects clear saved face-metering regions and tap holds. Reconnect and
+cold-settings restarts are ignored while a camera open is in flight, so they
+cannot replace its callback context. Pending cold settings remain available
+for an explicit retry.
 
 ### Tuning files
 

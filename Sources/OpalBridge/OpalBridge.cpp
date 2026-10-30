@@ -557,7 +557,6 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
 
                 const int w = f->getWidth();
                 const int h_ = f->getHeight();
-                h->width = w; h->height = h_;
 
                 auto now = std::chrono::steady_clock::now();
                 double latencyMs =
@@ -572,6 +571,8 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
 
                 {
                     std::lock_guard<std::mutex> lk(h->telMutex);
+                    h->width = w;
+                    h->height = h_;
                     h->latencies.push_back(latencyMs);
                     if(h->latencies.size() > 60) h->latencies.pop_front();
                     double t = std::chrono::duration<double>(now.time_since_epoch()).count();
@@ -851,8 +852,11 @@ bool opal_get_info(OpalDeviceHandle* h, char* sensorName, size_t n,
     if(!h) return false;
     if(sensorName && n) std::snprintf(sensorName, n, "%s", h->sensorName.c_str());
     if(usbSpeed) *usbSpeed = h->usbSpeed;
-    if(width)    *width    = h->width;
-    if(height)   *height   = h->height;
+    {
+        std::lock_guard<std::mutex> lk(h->telMutex);
+        if(width)  *width  = h->width;
+        if(height) *height = h->height;
+    }
     return true;
 }
 

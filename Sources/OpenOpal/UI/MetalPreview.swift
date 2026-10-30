@@ -10,7 +10,7 @@ import simd
 /// short axis fills the window and the long axis crops, so the image always
 /// reaches the edges.
 struct MetalPreview: NSViewRepresentable {
-    var texture: MTLTexture?
+    var frame: RenderedFrame?
     var mirrored: Bool
     /// Freezes the draw loop (shows the last frame). Used while panel
     /// animations run so the glass above isn't re-blurring moving video.
@@ -39,7 +39,7 @@ struct MetalPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MTKView, context: Context) {
-        context.coordinator.texture = texture
+        context.coordinator.frame = frame
         context.coordinator.mirrored = mirrored
         view.isPaused = paused
         if let tapView = view as? TapMTKView { bindTap(tapView, context.coordinator) }
@@ -55,7 +55,7 @@ struct MetalPreview: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, MTKViewDelegate {
-        var texture: MTLTexture?
+        var frame: RenderedFrame?
         var mirrored = true
         weak var view: MTKView?
 
@@ -96,13 +96,14 @@ struct MetalPreview: NSViewRepresentable {
         }
 
         func draw(in view: MTKView) {
-            guard let texture,
+            guard let frame,
                   let pipeline,
                   let queue,
                   let drawable = view.currentDrawable,
                   let pass = view.currentRenderPassDescriptor,
                   let cmd = queue.makeCommandBuffer(),
                   let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+            let texture = frame.texture
 
             let scale = fillScale(
                 image: CGSize(width: texture.width, height: texture.height),
@@ -118,6 +119,9 @@ struct MetalPreview: NSViewRepresentable {
             enc.endEncoding()
 
             cmd.present(drawable)
+            cmd.addCompletedHandler { [frame] _ in
+                withExtendedLifetime(frame) {}
+            }
             cmd.commit()
         }
 
