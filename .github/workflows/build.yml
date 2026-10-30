@@ -79,6 +79,9 @@ jobs:
       - name: Run camera-free bridge regressions
         run: ctest --test-dir build/bridgetest --output-on-failure
 
+      - name: Run camera-free sink regressions
+        run: bash scripts/check-sink.sh
+
       - name: Generate the Xcode project
         run: xcodegen generate
 

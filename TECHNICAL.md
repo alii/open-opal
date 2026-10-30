@@ -35,6 +35,8 @@ The virtual camera only installs from a signed build in /Applications; see
 Bootstrap disables network-camera discovery and connections inside DepthAI.
 The C1 uses USB only. Rebuild the SDK and app to update existing copies.
 
+Bootstrap pairs curl's TLS headers with Hunter's libraries, not Homebrew's.
+
 ### First-generation C1s
 
 First-generation IMX378 C1s use a RAM-only bootloader handoff. The pinned
@@ -161,6 +163,16 @@ advertised format. Other input sizes are scaled to fit with black bars rather
 than stretched; native 1080p BGRA frames pass through without an extra copy.
 The feeder uses the device's output scope and playback stream. The capture
 stream serves camera clients and is not a queue for sending our frames.
+
+Only the matching Apple-signed host and developer team may send frames. The
+extension checks running code against host metadata sealed by `sign.sh`; it
+does not need sandbox access to the host's files. Invalid timestamps are
+dropped, stopped sessions discard pending callbacks, and failed feeder starts
+release their queue.
+
+After an app update, reinstall the virtual camera from Open Opal. Releases must
+bump the app, extension and launcher build numbers together so macOS replaces
+the old extension and its sealed host metadata.
 
 **Start OpenOpal automatically** registers a small login helper that listens
 for capture requests on "Open Opal Camera" and opens OpenOpal without taking

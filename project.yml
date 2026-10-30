@@ -47,7 +47,7 @@ targets:
         CFBundleDisplayName: Open Opal
         CFBundleIconFile: AppIcon
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "2"
         LSMinimumSystemVersion: "14.0"
         LSUIElement: true
         NSHumanReadableCopyright: "Open source. Not affiliated with Opal Camera Inc."
@@ -153,7 +153,7 @@ targets:
       properties:
         CFBundleDisplayName: Open Opal Camera
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "2"
         # SYSX marks this bundle as a system extension. Without it, macOS scans
         # Contents/Library/SystemExtensions, fails to recognise the bundle, and
         # reports "Extension not found in App bundle" even though it's right there.
@@ -197,7 +197,7 @@ targets:
         CFBundleName: OpenOpal Launcher
         CFBundleDisplayName: OpenOpal Launcher
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "2"
         LSMinimumSystemVersion: "14.0"
         LSUIElement: true
         NSSupportsAutomaticTermination: false

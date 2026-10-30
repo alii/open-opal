@@ -49,6 +49,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
             return
         }
 
+        let ownedQueue = q.takeRetainedValue()
         guard CMIODeviceStartStream(device, sink) == noErr else {
             log.error("CMIODeviceStartStream failed")
             return
@@ -56,7 +57,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
 
         deviceID = device
         sinkStreamID = sink
-        queue = q.takeRetainedValue()
+        queue = ownedQueue
         isConnected = true
         log.info("feeding virtual camera (device \(device), sink \(sink))")
     }
