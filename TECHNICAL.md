@@ -35,6 +35,8 @@ The virtual camera only installs from a signed build in /Applications; see
 Bootstrap disables network-camera discovery and connections inside DepthAI.
 The C1 uses USB only. Rebuild the SDK and app to update existing copies.
 
+Bootstrap pairs curl's TLS headers with Hunter's libraries, not Homebrew's.
+
 ### First-generation C1s
 
 First-generation IMX378 C1s use a RAM-only bootloader handoff. The pinned
@@ -66,6 +68,14 @@ cmake -S Sources/OpalBridge -B build/control-tests \
   -DOPAL_BRIDGE_TEST=ON
 cmake --build build/control-tests --target control_delta_test usb_only_test
 ctest --test-dir build/control-tests --output-on-failure
+```
+
+The production Metal renderer has a camera-free absolute neutral video-range
+ramp check on Apple silicon. It compares GPU output with absolute display levels
+rather than another processed frame:
+
+```sh
+./scripts/check-render.sh
 ```
 
 ## The hardware
@@ -126,6 +136,11 @@ then blurred in linear light so highlights bloom instead of greying out. An
 optional depth-graded mode uses
 [Depth Anything V2](https://huggingface.co/apple/coreml-depth-anything-v2-small)
 for distance-based falloff.
+
+Linear-light decoding and display encoding use matching sRGB transfer curves.
+With bokeh off, the neutral video-range ramp must round-trip to its absolute
+display levels within one 8-bit step; comparison only against another processed
+frame would miss unwanted darkening.
 
 ### Autofocus
 

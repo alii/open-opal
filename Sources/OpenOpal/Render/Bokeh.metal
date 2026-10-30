@@ -41,7 +41,7 @@ constant int   MIN_SAMPLES = 12;
 
 inline float3 srgbToLinear(float3 c) {
     return select(c / 12.92,
-                  pow((c + 0.055) / 1.055, 3.0),
+                  pow((c + 0.055) / 1.055, 2.4),
                   c > 0.04045);
 }
 
