@@ -29,15 +29,15 @@ private let log = Logger(subsystem: "com.openopal", category: "depth")
 ///     no-op. It's dealt with downstream, by temporal smoothing in the shader.
 final class DepthProvider: @unchecked Sendable {
 
-    private let device: MTLDevice
+    private let inferenceLock = NSLock()
+    private let textures: AnalysisTexturePool
     private let model: VNCoreMLModel
     private let request: VNCoreMLRequest
 
-    private var texture: MTLTexture?
     private var scratch: [Float] = []
 
     init?(device: MTLDevice) {
-        self.device = device
+        textures = AnalysisTexturePool(device: device, format: .r32Float, capacity: 3)
 
         guard let url = Bundle.main.url(forResource: "DepthAnythingV2SmallF16",
                                         withExtension: "mlmodelc") else {
@@ -69,28 +69,49 @@ final class DepthProvider: @unchecked Sendable {
 
     /// Depth map, plus the values on the CPU so we can find where the subject
     /// actually is (see SubjectAnalysis).
-    struct Result {
-        let texture: MTLTexture
+    struct Result: @unchecked Sendable {
+        let backing: AnalysisTexturePool.Lease
+        var texture: MTLTexture { backing.texture }
         let values: [Float]     // 0 = near, 1 = far
         let width: Int
         let height: Int
     }
 
     /// Kept alive across frames — see MatteProvider for why this matters.
-    private let sequence = VNSequenceRequestHandler()
+    private var sequence = VNSequenceRequestHandler()
 
     /// The previous *aligned* depth frame, which the next one is fitted to.
     private var previous: [Float] = []
+    private var generation: UInt64 = 0
 
-    func depth(from pixelBuffer: CVPixelBuffer) async -> Result? {
-        do {
-            try sequence.perform([request], on: pixelBuffer)
-        } catch {
-            log.error("depth inference failed: \(error.localizedDescription, privacy: .public)")
-            return nil
+    func depth(from pixelBuffer: CVPixelBuffer, generation token: UInt64) async -> Result? {
+        // Both analysis modes share this request, handler, and alignment history.
+        inferenceLock.withLock {
+            guard token >= generation else { return nil }
+            if token != generation { resetState(generation: token) }
+            do {
+                try sequence.perform([request], on: pixelBuffer)
+            } catch {
+                log.error("depth inference failed: \(error.localizedDescription, privacy: .public)")
+                return nil
+            }
+            guard let obs = request.results?.first as? VNPixelBufferObservation else { return nil }
+            return normalizeAndUpload(obs.pixelBuffer)
         }
-        guard let obs = request.results?.first as? VNPixelBufferObservation else { return nil }
-        return normalizeAndUpload(obs.pixelBuffer)
+    }
+
+    func reset(generation token: UInt64) {
+        inferenceLock.withLock {
+            if token > generation { resetState(generation: token) }
+        }
+    }
+
+    private func resetState(generation token: UInt64) {
+        generation = token
+        sequence = VNSequenceRequestHandler()
+        previous.removeAll(keepingCapacity: true)
+        smoothedScale = 1
+        smoothedShift = 0
     }
 
     /// Fit this frame onto the previous one with a single scale and shift.
@@ -180,13 +201,8 @@ final class DepthProvider: @unchecked Sendable {
         align(&scratch)
         previous = scratch
 
-        if texture == nil || texture!.width != w || texture!.height != h {
-            let d = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .r32Float, width: w, height: h, mipmapped: false)
-            d.usage = [.shaderRead, .shaderWrite]
-            texture = device.makeTexture(descriptor: d)
-        }
-        guard let texture else { return nil }
+        guard let backing = textures.acquire(width: w, height: h) else { return nil }
+        let texture = backing.texture
 
         scratch.withUnsafeBytes { raw in
             texture.replace(region: MTLRegionMake2D(0, 0, w, h),
@@ -194,6 +210,6 @@ final class DepthProvider: @unchecked Sendable {
                             withBytes: raw.baseAddress!,
                             bytesPerRow: w * MemoryLayout<Float>.size)
         }
-        return Result(texture: texture, values: scratch, width: w, height: h)
+        return Result(backing: backing, values: scratch, width: w, height: h)
     }
 }

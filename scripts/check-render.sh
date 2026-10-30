@@ -12,6 +12,7 @@ xcrun swiftc -swift-version 6 -target arm64-apple-macosx14.0 -parse-as-library \
     "$ROOT/Sources/OpenOpal/Render/BokehRenderer.swift" \
     "$ROOT/Sources/OpenOpal/Render/DepthProvider.swift" \
     "$ROOT/Sources/OpenOpal/Render/MatteProvider.swift" \
+    "$ROOT/Sources/OpenOpal/Render/AnalysisTexturePool.swift" \
     "$ROOT/Sources/OpenOpal/Camera/CameraSettings.swift" \
     "$ROOT/tools/render_checks.swift" \
     -o "$WORK/render-checks"
