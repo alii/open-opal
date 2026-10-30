@@ -8,7 +8,7 @@ Composer software; Open Opal keeps the camera working, and adds a few things.
 - Full camera control: exposure, focus, white balance, image tuning, 4K/1080p/720p
 - Background blur
 - A virtual camera, **Open Opal Camera**, for Zoom, Meet, FaceTime and the rest
-- Lives in the menu bar; drag the panel off to float it
+- Lives in the menu bar; drag to float, then release near the menu bar to dock
 - About 45 ms from lens to screen
 
 Runs on Apple silicon Macs with macOS 14 or later. Nothing is written to the
