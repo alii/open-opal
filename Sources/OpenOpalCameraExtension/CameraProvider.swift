@@ -325,7 +325,7 @@ fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource, @
     func setStreamProperties(_ streamProperties: CMIOExtensionStreamProperties) throws {}
 
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
-        guard authorizer?.isAuthorized(signingID: client.signingID, pid: client.pid) == true,
+        guard authorizer?.isAuthorized(pid: client.pid) == true,
               session.authorize(client.clientID) else { return false }
         self.client = client
         return true
