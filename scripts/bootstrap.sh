@@ -45,6 +45,13 @@ hunter_config(
 EOF
 fi
 
+# Keep curl's TLS headers paired with Hunter's libraries. Optional Homebrew
+# packages otherwise add a broad include path that shadows those headers.
+if ! grep -q "OPAL_CURL_HEADERS_PATCH" "$SRC/cmake/Hunter/config.cmake"; then
+  echo "==> patching curl: keep TLS headers inside the SDK dependency set"
+  git -C "$SRC" apply "$ROOT/patches/depthai-curl-headers.patch"
+fi
+
 # First-generation C1s report 0.0.0. Only GetBootloaderVersion and UsbRomBoot
 # bypass the version gate for the RAM-only handoff; all other requests keep it.
 # Do not silently reuse an SDK containing the older, unrestricted exception.
