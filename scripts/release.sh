@@ -13,6 +13,12 @@
 # Requires a keychain profile created once with:
 #   xcrun notarytool store-credentials openopal \
 #     --apple-id <you@example.com> --team-id RD994J874S
+#
+# CI notarizes with an App Store Connect API key instead: NOTARY_KEY (the path
+# to the .p8), NOTARY_KEY_ID and NOTARY_ISSUER.
+#
+# RELEASE_VERSION and RELEASE_BUILD, when set, replace the version in the built app, its
+# camera extension and its launcher. The release workflow sets both.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,6 +35,19 @@ xcodebuild -project OpenOpal.xcodeproj -scheme OpenOpal \
   -configuration Release -derivedDataPath "$DERIVED" build \
   > build/xcodebuild.log 2>&1 || { tail -25 build/xcodebuild.log; exit 1; }
 
+if [ -n "${RELEASE_VERSION:-}" ]; then
+  echo "==> stamping version $RELEASE_VERSION (${RELEASE_BUILD:?})"
+  # All three get the same numbers. This runs before signing, which seals them.
+  for PLIST in \
+    "$APP/Contents/Info.plist" \
+    "$APP/Contents/Library/SystemExtensions/sh.alistair.open-opal.camera.systemextension/Contents/Info.plist" \
+    "$APP/Contents/Library/LoginItems/OpenOpalLauncher.app/Contents/Info.plist"; do
+    /usr/libexec/PlistBuddy \
+      -c "Set :CFBundleShortVersionString $RELEASE_VERSION" \
+      -c "Set :CFBundleVersion $RELEASE_BUILD" "$PLIST"
+  done
+fi
+
 echo "==> bundling runtime dependencies"
 python3 ./scripts/bundle-dependencies.py "$APP"
 
@@ -42,11 +61,11 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
 echo "==> submitting to Apple (this usually takes 1-5 minutes)"
-if [ -n "${NOTARY_APPLE_ID:-}" ]; then
+if [ -n "${NOTARY_KEY:-}" ]; then
   # CI path: credentials come from the environment, not a stored profile.
   xcrun notarytool submit "$ZIP" \
-    --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" \
-    --password "$NOTARY_PASSWORD" --wait
+    --key "$NOTARY_KEY" --key-id "${NOTARY_KEY_ID:?}" \
+    --issuer "${NOTARY_ISSUER:?}" --wait
 else
   xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
 fi

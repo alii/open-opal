@@ -1,7 +1,7 @@
 name: Build
 
-# The release workflow only runs on tags, so nothing checks a push or a pull
-# request. This does, and needs no secrets: the app is built unsigned.
+# The release workflow only runs when started by hand, so nothing checks a push
+# or a pull request. This does, and needs no secrets: the app is built unsigned.
 #
 # It covers more than "does it compile". bootstrap.sh applies the depthai
 # patch with `git apply`, which fails hard if the patch ever stops applying to
@@ -10,7 +10,7 @@ name: Build
 on:
   push:
     branches: ["**"]
-    tags-ignore: ["v*"]   # tags are the release workflow's job
+    tags-ignore: ["v*"]   # the release workflow makes these, from a commit already built
   pull_request:
   workflow_dispatch:
 
