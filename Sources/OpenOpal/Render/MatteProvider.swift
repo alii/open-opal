@@ -8,8 +8,9 @@ private let log = Logger(subsystem: "com.openopal", category: "matte")
 
 /// A subject matte, plus the CPU-side mask so we can ask questions about it —
 /// where the subject is, and how far away.
-struct MatteResult {
-    let texture: MTLTexture
+struct MatteResult: @unchecked Sendable {
+    let backing: AnalysisTexturePool.Lease
+    var texture: MTLTexture { backing.texture }
     let mask: [UInt8]     // 0..255, row-major
     let width: Int
     let height: Int
@@ -32,13 +33,13 @@ final class MatteProvider: @unchecked Sendable {
     /// is. Running several frames concurrently raises THROUGHPUT without touching
     /// latency or breaking the frame↔mask pairing that keeps the blur aligned.
     ///
-    /// Each lane needs its own request and its own output texture, or two frames
-    /// would race to write the same one.
+    /// Each lane owns its request. Consumers keep output storage leased after
+    /// the lane is released.
     private final class Lane {
         let request = VNGeneratePersonSegmentationRequest()
-        let sequence = VNSequenceRequestHandler()
-        var texture: MTLTexture?
+        var sequence = VNSequenceRequestHandler()
         var inUse = false
+        var needsReset = false
 
         init() {
             request.qualityLevel = .balanced
@@ -46,38 +47,61 @@ final class MatteProvider: @unchecked Sendable {
         }
     }
 
-    private let device: MTLDevice
+    private let textures: AnalysisTexturePool
     private let lock = NSLock()
     private var lanes: [Lane]
     private var quality: CameraSettings.MatteQuality = .balanced
+    private var generation: UInt64 = 0
 
     /// Rolling inference time, so the UI can show what the mask actually costs
     /// instead of us guessing.
     private(set) var lastMs: Double = 0
 
     init(device: MTLDevice, laneCount: Int = 3) {
-        self.device = device
-        self.lanes = (0..<max(laneCount, 1)).map { _ in Lane() }
+        let count = max(laneCount, 1)
+        self.lanes = (0..<count).map { _ in Lane() }
+        textures = AnalysisTexturePool(device: device, format: .r8Unorm, capacity: count + 2)
     }
 
     func setQuality(_ q: CameraSettings.MatteQuality) {
         lock.lock(); defer { lock.unlock() }
         guard q != quality else { return }
         quality = q
-        let level: VNGeneratePersonSegmentationRequest.QualityLevel = switch q {
+    }
+
+    func reset(generation token: UInt64) {
+        lock.withLock {
+            guard token > generation else { return }
+            generation = token
+            for lane in lanes { lane.needsReset = true }
+        }
+    }
+
+    private func qualityLevel() -> VNGeneratePersonSegmentationRequest.QualityLevel {
+        switch quality {
         case .fast:     .fast
         case .balanced: .balanced
         case .accurate: .accurate
         }
-        for lane in lanes { lane.request.qualityLevel = level }
     }
 
     /// Nil if every lane is busy — the caller should drop this frame rather than
     /// queue it. Queueing just builds a backlog and turns latency into lag.
-    private func claimLane() -> Lane? {
+    private func claimLane(generation token: UInt64) -> Lane? {
         lock.lock(); defer { lock.unlock() }
+        guard token >= generation else { return nil }
+        if token != generation {
+            generation = token
+            for lane in lanes { lane.needsReset = true }
+        }
         guard let lane = lanes.first(where: { !$0.inUse }) else { return nil }
         lane.inUse = true
+        // Vision may still be using the other lanes' requests.
+        lane.request.qualityLevel = qualityLevel()
+        if lane.needsReset {
+            lane.sequence = VNSequenceRequestHandler()
+            lane.needsReset = false
+        }
         return lane
     }
 
@@ -85,8 +109,8 @@ final class MatteProvider: @unchecked Sendable {
         lock.lock(); lane.inUse = false; lock.unlock()
     }
 
-    func matte(from pixelBuffer: CVPixelBuffer) async -> MatteResult? {
-        guard let lane = claimLane() else { return nil }
+    func matte(from pixelBuffer: CVPixelBuffer, generation token: UInt64) async -> MatteResult? {
+        guard let lane = claimLane(generation: token) else { return nil }
         defer { release(lane) }
 
         let start = CFAbsoluteTimeGetCurrent()
@@ -97,24 +121,19 @@ final class MatteProvider: @unchecked Sendable {
             return nil
         }
         guard let result = lane.request.results?.first as? VNPixelBufferObservation else { return nil }
-        let out = upload(result.pixelBuffer, into: lane)
+        let out = upload(result.pixelBuffer)
 
         let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
         lock.withLock { lastMs += 0.2 * (ms - lastMs) }
         return out
     }
 
-    private func upload(_ mask: CVPixelBuffer, into lane: Lane) -> MatteResult? {
+    private func upload(_ mask: CVPixelBuffer) -> MatteResult? {
         let w = CVPixelBufferGetWidth(mask)
         let h = CVPixelBufferGetHeight(mask)
 
-        if lane.texture == nil || lane.texture!.width != w || lane.texture!.height != h {
-            let d = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .r8Unorm, width: w, height: h, mipmapped: false)
-            d.usage = [.shaderRead, .shaderWrite]
-            lane.texture = device.makeTexture(descriptor: d)
-        }
-        guard let texture = lane.texture else { return nil }
+        guard let backing = textures.acquire(width: w, height: h) else { return nil }
+        let texture = backing.texture
 
         CVPixelBufferLockBaseAddress(mask, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(mask, .readOnly) }
@@ -131,7 +150,7 @@ final class MatteProvider: @unchecked Sendable {
                 memcpy(dst.baseAddress! + row * w, src + row * stride, w)
             }
         }
-        return MatteResult(texture: texture, mask: flat, width: w, height: h)
+        return MatteResult(backing: backing, mask: flat, width: w, height: h)
     }
 }
 

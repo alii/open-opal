@@ -63,7 +63,7 @@ struct MenuBarFlyout: View {
                     .overlay {
                         GeometryReader { preview in
                             MetalPreview(
-                                texture: camera.latestTexture,
+                                frame: camera.latestFrame,
                                 mirrored: camera.settings.mirrorPreview,
                                 paused: camera.previewPaused
                             ) { viewPoint, sensorPoint in
