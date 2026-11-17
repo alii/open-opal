@@ -1,23 +1,67 @@
 name: Release
 
-# Push a tag like v0.1.0 to build, sign, notarize, and publish a DMG.
-# Tag-driven on purpose: GitHub Releases are anchored to tags, so every release
-# is an immutable snapshot with an auto-generated changelog since the last tag.
+# Builds, signs and notarizes Open Opal from master, then publishes the DMG as
+# the latest GitHub release. It only runs when started by hand, so several PRs
+# can go in first:
+#
+#   gh workflow run release.yml -f version=0.2.0
+#
+# or Actions > Release > Run workflow on GitHub. The run makes the v0.2.0 tag
+# itself.
+#
+# Secrets it needs:
+#   CERT_P12_BASE64        the Developer ID Application certificate and its key, as base64
+#   CERT_PASSWORD          the .p12's password
+#   APP_PROFILE_BASE64     the app's provisioning profile, as base64
+#   CAMERA_PROFILE_BASE64  the camera extension's provisioning profile, as base64
+#   ASC_KEY_P8             an App Store Connect API key (the .p8 file's text), for notarizing
+#   ASC_KEY_ID             that key's ID
+#   ASC_ISSUER_ID          the team's issuer ID
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, like 0.2.0"
+        required: true
+        type: string
+
+# One release at a time, in the order they were started.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
-  contents: write   # needed to create the GitHub Release
+  contents: write   # needed to create the tag and the GitHub Release
+
+env:
+  # Passed to the shell as data. The version is never pasted into a script.
+  RELEASE_VERSION: ${{ inputs.version }}
+  # Goes into the app, the camera extension and the launcher as
+  # CFBundleVersion. It goes up with every release, which is how macOS knows to
+  # replace an installed camera extension.
+  RELEASE_BUILD: ${{ github.run_number }}
 
 jobs:
-  build:
+  release:
     # Needs the macOS 26 image for Xcode 26 / the Liquid Glass SDK. If the
     # runner label changes, bump it here.
     runs-on: macos-26
     timeout-minutes: 90
 
     steps:
+      - name: Check the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version must look like 0.2.0, without a v."
+            exit 1
+          fi
+          if gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::v$RELEASE_VERSION is already released."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - name: Install build tools
@@ -43,50 +87,42 @@ jobs:
       - name: Fetch Core ML model
         run: ./scripts/fetch-models.sh
 
-      # --- Signing setup -------------------------------------------------------
-      # A throwaway keychain holds the imported Developer ID identity for the
-      # length of the job, then is discarded with the runner.
-      - name: Import signing certificate
+      - name: Set up signing and notarizing
         env:
           CERT_P12_BASE64: ${{ secrets.CERT_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-
-          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
-            -P "$CERT_PASSWORD" -T /usr/bin/codesign
-          # Let codesign use the key without an interactive prompt.
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          # Make the throwaway keychain visible to the signing tools.
-          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
-
-      - name: Install provisioning profiles
-        env:
           APP_PROFILE_BASE64: ${{ secrets.APP_PROFILE_BASE64 }}
           CAMERA_PROFILE_BASE64: ${{ secrets.CAMERA_PROFILE_BASE64 }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
-          mkdir -p Provisioning
-          echo "$APP_PROFILE_BASE64"    | base64 --decode > Provisioning/OpenOpal.provisionprofile
-          echo "$CAMERA_PROFILE_BASE64" | base64 --decode > Provisioning/OpenOpalCameraExtension.provisionprofile
+          # A keychain of its own, which only lives as long as this machine.
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          pass=$(openssl rand -hex 24)
+          security create-keychain -p "$pass" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pass" "$kc"
+          printf '%s' "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          # Lets codesign use the key without a password prompt no one is there to answer.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pass" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
 
-      # --- Build / sign / notarize --------------------------------------------
+          mkdir -p Provisioning
+          printf '%s' "$APP_PROFILE_BASE64"    | base64 --decode > Provisioning/OpenOpal.provisionprofile
+          printf '%s' "$CAMERA_PROFILE_BASE64" | base64 --decode > Provisioning/OpenOpalCameraExtension.provisionprofile
+
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+
       - name: Build, sign, notarize
         env:
           CI: "true"
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_KEY: ${{ runner.temp }}/AuthKey.p8
+          NOTARY_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.ASC_ISSUER_ID }}
         run: ./scripts/release.sh
 
       - name: Package DMG
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           APP="build/DerivedData/Build/Products/Release/OpenOpal.app"
           create-dmg \
@@ -96,31 +132,44 @@ jobs:
             --icon "OpenOpal.app" 150 190 \
             --app-drop-link 390 190 \
             --no-internet-enable \
-            "OpenOpal-$RELEASE_TAG.dmg" "$APP" || \
-          create-dmg "OpenOpal-$RELEASE_TAG.dmg" "$APP"
+            "OpenOpal-v$RELEASE_VERSION.dmg" "$APP" || \
+          create-dmg "OpenOpal-v$RELEASE_VERSION.dmg" "$APP"
 
       # A DMG signed and notarized inside doesn't carry its own ticket; notarize
       # and staple the DMG itself so Gatekeeper is happy on first open.
       - name: Notarize DMG
         env:
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          NOTARY_KEY: ${{ runner.temp }}/AuthKey.p8
+          NOTARY_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          DMG="OpenOpal-$RELEASE_TAG.dmg"
+          DMG="OpenOpal-v$RELEASE_VERSION.dmg"
           xcrun notarytool submit "$DMG" \
-            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" \
-            --password "$NOTARY_PASSWORD" --wait
+            --key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" \
+            --wait
+          # Fails unless Apple accepted the DMG.
           xcrun stapler staple "$DMG"
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: OpenOpal-${{ github.ref_name }}.dmg
-          generate_release_notes: true
-          body: |
-            Download the DMG, drag Open Opal to Applications, and launch it.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          Download the DMG, drag Open Opal to Applications, and launch it.
 
-            For the virtual camera, open **Advanced → Virtual Camera → Install
-            virtual camera** and approve it in System Settings when prompted.
+          For the virtual camera, click **Install virtual camera** and allow it
+          in System Settings if asked.
+          NOTES
+          gh release create "v$RELEASE_VERSION" "OpenOpal-v$RELEASE_VERSION.dmg" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v$RELEASE_VERSION" \
+            --notes-file notes.md \
+            --generate-notes \
+            --latest
+
+      - name: Clean up
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"

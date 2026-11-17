@@ -1,7 +1,15 @@
 # Releasing
 
-Pushing a `v*` tag builds, signs, notarizes, and publishes a DMG to GitHub
-Releases (`.github/workflows/release.yml`).
+Releases are started by hand, so several PRs can go in first:
+
+```sh
+gh workflow run release.yml -f version=0.2.0
+```
+
+Or use Actions > Release > Run workflow on GitHub. The run builds `master`,
+signs and notarizes it, makes the `v0.2.0` tag, and publishes the DMG to GitHub
+Releases (`.github/workflows/release.yml`). The app, camera extension and
+launcher all get that version, and the run's number as their build number.
 
 The release script bundles the complete non-system dylib dependency tree into
 `Contents/Frameworks` before signing. This includes indirect dependencies such
@@ -26,11 +34,6 @@ all Mach-O files, including the camera extension, and rejects unresolved
 same read-only check before signing. Run packaging before signing, since
 rewriting a Mach-O file invalidates any existing signature. The packaging tests
 compile tiny Mach-O fixtures on macOS without launching the app or camera.
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
 
 ## Model downloads
 
@@ -63,12 +66,11 @@ base64 values were generated into `~/Library/Application Support/OpenOpal/ci-sec
 |---|---|
 | `CERT_P12_BASE64` | contents of `ci-secrets/CERT_P12_BASE64.txt` |
 | `CERT_PASSWORD` | contents of `ci-secrets/CERT_PASSWORD.txt` |
-| `KEYCHAIN_PASSWORD` | any random string (ephemeral CI keychain) |
 | `APP_PROFILE_BASE64` | contents of `ci-secrets/APP_PROFILE_BASE64.txt` |
 | `CAMERA_PROFILE_BASE64` | contents of `ci-secrets/CAMERA_PROFILE_BASE64.txt` |
-| `NOTARY_APPLE_ID` | your Apple ID email |
-| `NOTARY_TEAM_ID` | `RD994J874S` |
-| `NOTARY_PASSWORD` | an app-specific password from appleid.apple.com |
+| `ASC_KEY_P8` | the text of an App Store Connect API key, `AuthKey_XXXXXXXXXX.p8` |
+| `ASC_KEY_ID` | that key's ID, the `XXXXXXXXXX` in its file name |
+| `ASC_ISSUER_ID` | the issuer ID shown above the keys in App Store Connect |
 
 The certificate and profiles expire (2031) or are invalidated when you change
 capabilities — regenerate them per [SIGNING.md](SIGNING.md) and re-encode the
@@ -85,12 +87,6 @@ from source (~several minutes); it's cached afterward and only rebuilds when
 
 ## Release names
 
-Packaging and notarization receive the tag through the `RELEASE_TAG` environment
-variable and quote it as filename data. Tags are never inserted into shell
-source: a valid Git tag can contain shell command substitution. The release
-action's `files` input remains data, not shell code.
-
-The offline release-name tests run with
-`python3 -m unittest discover -s scripts/tests -p test_release_names.py -v`.
-They execute the workflow's shell steps using local DMG and notary fixtures,
-including tags containing shell syntax. They do not sign or notarize artifacts.
+The version you type is checked first: it must look like `0.2.0`. It then
+reaches the shell steps through the `RELEASE_VERSION` environment variable and
+is never pasted into a script.
