@@ -11,7 +11,6 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private var panel: ControlsPanel!
     private var clickMonitor: Any?
-    private var dragMonitor: Any?
     private var isDragging = false
     private var floatingSize = NSSize(width: 440, height: 780)
     /// Called whenever the controls are brought on screen.
@@ -72,6 +71,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         } else {
             if !isFloating { positionAtStatusItem() }
             panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(panel)
             onShow?()
         }
     }
@@ -104,35 +104,67 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         panel.styleMask.remove(.resizable)
         positionAtStatusItem()
         panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(panel)
         onShow?()
     }
 
     func hide() { panel.orderOut(nil) }
 
     func drag(with event: NSEvent) {
+        guard !isDragging else { return }
         isDragging = true
-        NSCursor.closedHand.push()
-        defer { NSCursor.pop() }
         // Keep the grab point stable. Resizing is available after detaching.
         isFloating = true
         panel.styleMask.insert(.resizable)
-        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDragged) { [weak self] event in
-            MainActor.assumeIsolated { self?.updateSnapTarget() }
-            return event
+        let startMouse = panel.convertPoint(toScreen: event.locationInWindow)
+        let startOrigin = panel.frame.origin
+        panel.disableCursorRects()
+        NSCursor.closedHand.push()
+        defer {
+            NSCursor.pop()
+            panel.enableCursorRects()
+            if let content = panel.contentView { panel.invalidateCursorRects(for: content) }
         }
-        panel.performDrag(with: event)
-        if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
-        dragMonitor = nil
-        updateSnapTarget()
+        while let next = panel.nextEvent(
+            matching: [.leftMouseDragged, .leftMouseUp],
+            until: .distantFuture, inMode: .eventTracking, dequeue: true) {
+            let mouse = NSEvent.mouseLocation
+            panel.setFrameOrigin(NSPoint(
+                x: startOrigin.x + mouse.x - startMouse.x,
+                y: startOrigin.y + mouse.y - startMouse.y))
+            updateSnapTarget(at: mouse)
+            NSCursor.closedHand.set()
+            if next.type == .leftMouseUp { break }
+        }
         isDragging = false
         if snapReady { dock() } else { screenChanged() }
         snapReady = false
         statusItem.button?.highlight(false)
     }
 
-    private func updateSnapTarget() {
-        snapReady = anchor?.insetBy(dx: -32, dy: -28).contains(NSEvent.mouseLocation) == true
+    private func updateSnapTarget(at mouse: NSPoint) {
+        guard anchor != nil,
+            let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) })
+        else {
+            snapReady = false
+            statusItem.button?.highlight(false)
+            return
+        }
+        snapReady = Self.shouldDock(
+            panelFrame: panel.frame, screenFrame: screen.frame,
+            visibleFrame: screen.visibleFrame, wasReady: snapReady)
         statusItem.button?.highlight(snapReady)
+    }
+
+    static func shouldDock(panelFrame: NSRect, screenFrame: NSRect,
+                           visibleFrame: NSRect, wasReady: Bool) -> Bool {
+        // Use the window's top edge, not the pointer or the icon's position.
+        // A wider release zone keeps the hint steady near the boundary.
+        let distance: CGFloat = wasReady ? 56 : 32
+        return visibleFrame.maxY < screenFrame.maxY
+            && panelFrame.maxX > screenFrame.minX && panelFrame.minX < screenFrame.maxX
+            && panelFrame.maxY >= visibleFrame.maxY - distance
+            && panelFrame.maxY <= screenFrame.maxY + distance
     }
 
     private func positionAtStatusItem() {
@@ -175,7 +207,6 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
 
     func shutdown() {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
-        if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
         NotificationCenter.default.removeObserver(self)
         NSStatusBar.system.removeStatusItem(statusItem)
         panel.orderOut(nil)
@@ -199,12 +230,17 @@ struct PanelDragHandle: NSViewRepresentable {
         init(controller: MenuBarPanelController) {
             self.controller = controller
             super.init(frame: .zero)
-            toolTip = "Drag to float. Drop near the Open Opal menu bar icon to dock."
+            toolTip = "Drag to float. Bring the window's top edge near the menu bar and release to dock."
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override func mouseDown(with event: NSEvent) {}
-        override func mouseDragged(with event: NSEvent) { controller.drag(with: event) }
+        override func mouseDown(with event: NSEvent) {
+            guard let next = window?.nextEvent(
+                matching: [.leftMouseDragged, .leftMouseUp],
+                until: .distantFuture, inMode: .eventTracking, dequeue: true),
+                next.type == .leftMouseDragged else { return }
+            controller.drag(with: event)
+        }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
     }
 }
