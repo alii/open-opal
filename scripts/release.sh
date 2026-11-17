@@ -30,6 +30,9 @@ APP="$DERIVED/Build/Products/Release/OpenOpal.app"
 ZIP="build/OpenOpal.zip"
 
 echo "==> building (Release)"
+# A fresh checkout has no build/ until the SDK is built, and CI restores the
+# SDK from a cache.
+mkdir -p build
 xcodegen generate >/dev/null
 xcodebuild -project OpenOpal.xcodeproj -scheme OpenOpal \
   -configuration Release -derivedDataPath "$DERIVED" build \
