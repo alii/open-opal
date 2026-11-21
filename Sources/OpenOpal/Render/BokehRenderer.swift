@@ -32,7 +32,6 @@ struct RenderSettings: Sendable {
     var uniformBlur: Bool
     var meterOnSubject: Bool
     var autoFocusSubject: Bool
-    var focusOnSubject: Bool
     var focusDistance: Double
     var aperture: Double
     var hexIris: Bool
@@ -48,7 +47,6 @@ struct RenderSettings: Sendable {
         // Focus tracking consumes the same subject analysis, so it has to be in
         // the snapshot too — otherwise "Follow face" silently does nothing
         // whenever bokeh and subject metering are both off.
-        focusOnSubject = s.focusOnSubject
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
@@ -163,6 +161,7 @@ final class BokehRenderer: @unchecked Sendable {
         private var _matte: MTLTexture?
         private var _matteBusy = false
         private var _depthBusy = false
+        private var _depthTick = 0
         private var _subject: SubjectInfo?
         private var _lastDepth: [Float] = []
         private var _lastDepthSize = (w: 0, h: 0)
@@ -182,13 +181,23 @@ final class BokehRenderer: @unchecked Sendable {
         }
         func endMatte() { lock.lock(); _matteBusy = false; lock.unlock() }
 
-        func tryBeginDepth() -> Bool {
+        /// True on every `interval`th call, and only if no depth pass is running.
+        /// The count lives here, under the lock, because in sync mode several
+        /// frames ask at once.
+        func tryBeginDepth(every interval: Int) -> Bool {
             lock.lock(); defer { lock.unlock() }
-            if _depthBusy { return false }
+            _depthTick &+= 1
+            if _depthTick % interval != 0 || _depthBusy { return false }
             _depthBusy = true
             return true
         }
-        func endDepth() { lock.lock(); _depthBusy = false; lock.unlock() }
+        func endDepth(ms: Double) {
+            lock.lock(); defer { lock.unlock() }
+            _depthBusy = false
+            _depthMs += 0.2 * (ms - _depthMs)
+        }
+        private var _depthMs = 0.0
+        var depthMs: Double { lock.lock(); defer { lock.unlock() }; return _depthMs }
 
         /// Keep the last depth values so a matte-only pass can still work out how
         /// far away the subject is.
@@ -224,6 +233,23 @@ final class BokehRenderer: @unchecked Sendable {
             }
         }
 
+        /// Sync mode has several masks in flight, and with a deadline they can
+        /// land late and out of order. Each frame takes a stamp on arrival, and a
+        /// mask older than the one already published is dropped.
+        private var _matteStamp = 0
+        private var _publishedStamp = 0
+        func nextMatteStamp() -> Int {
+            lock.lock(); defer { lock.unlock() }
+            _matteStamp += 1
+            return _matteStamp
+        }
+        func publish(matte: MTLTexture, stamp: Int) {
+            lock.lock(); defer { lock.unlock() }
+            guard stamp > _publishedStamp else { return }
+            _publishedStamp = stamp
+            _matte = matte
+        }
+
         func publish(depth: MTLTexture?, matte: MTLTexture?) {
             lock.lock(); defer { lock.unlock() }
             if let depth { _depth = depth }
@@ -242,7 +268,7 @@ final class BokehRenderer: @unchecked Sendable {
         let buffer: CVPixelBuffer
     }
 
-    var depthProvider: DepthProvider?
+    var depthProvider: (any DepthSource)?
     var matteProvider: MatteProvider?
 
     // MARK: - Frame
@@ -275,7 +301,7 @@ final class BokehRenderer: @unchecked Sendable {
         // In sync mode the caller has already run analyzeNow() for this exact
         // frame, so there's nothing to kick off here.
         let syncing = settings.bokehEnabled && settings.syncBokeh
-        if !syncing && (settings.bokehEnabled || settings.meterOnSubject || settings.focusOnSubject) {
+        if !syncing && (settings.bokehEnabled || settings.meterOnSubject) {
             kickOffAnalysisIfIdle(pixelBuffer: pixelBuffer,
                                   needsDepth: settings.bokehEnabled && !settings.uniformBlur)
         }
@@ -371,14 +397,11 @@ final class BokehRenderer: @unchecked Sendable {
     /// a second to appear. Now ~15Hz, with the background-masked history
     /// (depth_smooth) doing the real work of killing the trail.
     private static let depthInterval = 2
-    private var frameIndex = 0
 
     private func kickOffAnalysisIfIdle(pixelBuffer: CVPixelBuffer, needsDepth: Bool) {
         let box = BufferBox(buffer: pixelBuffer)
         let store = analysis
         let onSubject = self.onSubject
-
-        frameIndex &+= 1
 
         // --- segmentation: every frame. It's what tracks you. ---
         if let matteProvider, store.tryBeginMatte() {
@@ -404,48 +427,101 @@ final class BokehRenderer: @unchecked Sendable {
         }
 
         // --- depth: occasionally, and only when bokeh actually needs it. ---
-        guard needsDepth, let depthProvider else { return }
-        guard frameIndex % Self.depthInterval == 0, store.tryBeginDepth() else { return }
+        if needsDepth { kickOffDepthIfIdle(box) }
+    }
+
+    /// Starts a depth pass for this frame unless one is running or it is not
+    /// this frame's turn. Never waited on: the render loop uses the newest map.
+    private func kickOffDepthIfIdle(_ box: BufferBox) {
+        let store = analysis
+        guard let depthProvider, store.tryBeginDepth(every: Self.depthInterval) else { return }
 
         Task.detached(priority: .userInitiated) {
+            let start = CFAbsoluteTimeGetCurrent()
             if let d = await depthProvider.depth(from: box.buffer) {
                 store.publish(depth: d.texture, matte: nil)
                 store.storeDepthValues(d.values, w: d.width, h: d.height)
             }
-            store.endDepth()
+            store.endDepth(ms: (CFAbsoluteTimeGetCurrent() - start) * 1000)
         }
     }
+
+    /// What one depth map costs, in milliseconds. Zero until depth has run.
+    var depthMs: Double { analysis.depthMs }
 
     /// Fired whenever we get a fresh read on the subject. CameraModel uses it to
     /// meter exposure on the person rather than the whole frame.
     var onSubject: (@Sendable (SubjectInfo) -> Void)?
 
-    /// Compute the mask (and optionally depth) for THIS frame, and wait for it.
+    /// Compute the mask for THIS frame, and wait for it.
     ///
     /// Costs latency, buys exact alignment: the mask describes the frame we're
     /// about to composite, not one from 60ms ago. This is the whole point of
     /// "sync" mode — the trailing edge is a synchronisation problem, not a
     /// filtering one.
+    ///
+    /// Depth is not waited for. It used to be, on every frame, and with three
+    /// frames in flight that was three depth passes at once: a profile showed
+    /// them using more than a core of CPU to feed the GPU, for no visible gain.
+    /// The mask is what has to line up with you. The depth map only describes the
+    /// room behind you, and a map that is two frames old still describes it.
     func analyzeNow(pixelBuffer: CVPixelBuffer, needsDepth: Bool) async {
         let box = BufferBox(buffer: pixelBuffer)
 
-        async let matteTask = matteProvider?.matte(from: box.buffer)
-        async let depthTask = needsDepth ? depthProvider?.depth(from: box.buffer) : nil
-        let (m, d) = await (matteTask, depthTask)
+        if needsDepth { kickOffDepthIfIdle(box) }
+        guard let matteProvider else { return }
 
-        analysis.publish(depth: d?.texture, matte: m?.texture)
-        if let d { analysis.storeDepthValues(d.values, w: d.width, h: d.height) }
+        let store = analysis
+        let onSubject = self.onSubject
+        let stamp = store.nextMatteStamp()
 
-        if let m {
-            let (values, dw, dh) = analysis.depthValues()
-            let subject: SubjectInfo? = values.isEmpty
-                ? SubjectAnalysis.locate(matte: m)
-                : SubjectAnalysis.analyze(matte: m, depth: values,
-                                          depthWidth: dw, depthHeight: dh)
-            if let subject {
-                analysis.publishSubject(subject)
-                if let s = analysis.subject { onSubject?(s) }
+        // Wait for this frame's mask, but only so long. A mask normally takes
+        // 10 to 30ms. When something else is using the Neural Engine it has been
+        // measured at 70 to 180ms, and holding every frame for that turned a
+        // busy Mac into a video a fifth of a second behind. Past the deadline
+        // the frame goes out with the newest mask there is, and its own mask is
+        // still published when it lands, for the frames after it.
+        await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+            let once = ResumeOnce(ready)
+            Task.detached(priority: .userInitiated) {
+                if let m = await matteProvider.matte(from: box.buffer) {
+                    store.publish(matte: m.texture, stamp: stamp)
+
+                    let (values, dw, dh) = store.depthValues()
+                    let subject: SubjectInfo? = values.isEmpty
+                        ? SubjectAnalysis.locate(matte: m)
+                        : SubjectAnalysis.analyze(matte: m, depth: values,
+                                                  depthWidth: dw, depthHeight: dh)
+                    if let subject {
+                        store.publishSubject(subject)
+                        if let s = store.subject { onSubject?(s) }
+                    }
+                }
+                once.resume()
             }
+            Task.detached(priority: .userInitiated) {
+                try? await Task.sleep(for: Self.maskDeadline)
+                once.resume()
+            }
+        }
+    }
+
+    /// The longest a frame is held for its own mask in sync mode.
+    private static let maskDeadline: Duration = .milliseconds(50)
+
+    /// Resumes a continuation the first time it is asked, and never again.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+
+        func resume() {
+            lock.lock()
+            let c = continuation
+            continuation = nil
+            lock.unlock()
+            c?.resume()
         }
     }
 

@@ -1,3 +1,4 @@
+import OSLog
 import Metal
 import Observation
 import SwiftUI
@@ -60,6 +61,9 @@ final class CameraModel {
     /// on the capture thread, not the main actor.
     private let gate = FrameGate(max: 3)
 
+    /// Where each frame's time goes, written to the log every few seconds.
+    private let stats = PipelineStats()
+
     /// Frames finish out of order when several are in flight, so we track arrival
     /// order and refuse to present a frame older than one already on screen.
     private var nextSequence = 0
@@ -69,8 +73,6 @@ final class CameraModel {
     /// moves. Re-sending on every analysis pass would flood the control queue and
     /// make auto-exposure visibly pump.
     private var lastMeteredRect: CGRect?
-    private var lastFocusArea: CGFloat?
-    private var focusCooldownUntil: Date?
 
     func start() async {
         // A launch request can reopen the window while a previous window task
@@ -88,7 +90,6 @@ final class CameraModel {
             r.onSubject = { [weak self] subject in
                 Task { @MainActor in
                     self?.meter(on: subject)
-                    self?.focusOnSubject(subject)
                 }
             }
             renderer = r
@@ -108,7 +109,12 @@ final class CameraModel {
             // queued — a queue turns latency into lag), and in-flight frames can
             // finish out of order, so each is stamped on arrival and an older
             // frame never replaces a newer one on screen.
-            guard let self, self.gate.tryEnter() else { return }
+            guard let self else { return }
+            let arrived = CFAbsoluteTimeGetCurrent()
+            guard self.gate.tryEnter() else {
+                self.stats.dropped()
+                return
+            }
             let frame = FrameBox(buffer: pixelBuffer)
 
             Task.detached(priority: .userInitiated) {
@@ -129,28 +135,39 @@ final class CameraModel {
                     await renderer.analyzeNow(pixelBuffer: frame.buffer,
                                               needsDepth: !snapshot.uniformBlur)
                 }
+                let analysed = CFAbsoluteTimeGetCurrent()
 
                 let texture = TexBox(t: renderer.render(pixelBuffer: frame.buffer,
                                                         settings: snapshot))
 
                 // Feed the virtual camera the exact frame the preview shows —
                 // processed, un-mirrored. Off-main, like everything else here.
-                if let t = texture.t, self.feeder.connected,
+                // Only while a video app has the camera open: see wantsFrames.
+                if let t = texture.t, self.feeder.wantsFrames,
                    let pb = renderer.exportFrame(t) {
                     self.feeder.send(pb)
                 }
 
+                let rendered = CFAbsoluteTimeGetCurrent()
                 await MainActor.run {
                     if seq >= self.presentedSequence {
                         self.presentedSequence = seq
                         self.latestTexture = texture.t
                     }
                 }
+                self.stats.shown(waitMs: (analysed - arrived) * 1000,
+                                 renderMs: (rendered - analysed) * 1000,
+                                 totalMs: (CFAbsoluteTimeGetCurrent() - arrived) * 1000,
+                                 maskMs: renderer.matteProvider?.lastMs ?? 0,
+                                 depthMs: renderer.depthMs)
             }
         }
 
         if !feederPollStarted {
             feederPollStarted = true
+            // The feeder's poll below reconnects within a few seconds.
+            installer.onActivated = { [feeder] in feeder.disconnect() }
+            installer.updateIfOutdated()
             Task { [feeder] in
                 while true {
                     feeder.connectIfNeeded()
@@ -166,7 +183,8 @@ final class CameraModel {
 
     func reconnect() async {
         guard !isStarting, !isRebooting else { return }
-        resetFocusTracking()
+        // A fresh pipeline starts in the chosen focus mode, so no click is held.
+        focusHeld = false
         isRebooting = true
         defer { isRebooting = false }
         device.disconnect()
@@ -176,10 +194,18 @@ final class CameraModel {
     /// Send hot settings to the camera. Cheap — safe to call on every slider tick.
     /// The bridge coalesces and diffs, so nothing here blocks on USB.
     func push() {
-        // Clear immediately, even if manual focus is turned off again before
-        // the next subject analysis arrives.
-        if settings.manualFocus { resetFocusTracking() }
-        device.apply(settings)
+        device.apply(settings, holdingFocus: focusHeld)
+    }
+
+    /// True after a click on the picture: the lens focused there and is holding.
+    /// It is not saved. A click used to rewrite the saved focus mode to
+    /// one-shot, so one click turned continuous autofocus off for good.
+    private(set) var focusHeld = false
+
+    /// Give the lens back to whichever focus mode is chosen.
+    func resumeAutofocus() {
+        focusHeld = false
+        push()
     }
 
     /// Bring the renderer in line with the settings: mask quality, and whether the
@@ -189,10 +215,32 @@ final class CameraModel {
         renderer.matteProvider?.setQuality(settings.matteQuality)
 
         let needsDepth = settings.bokehEnabled && !settings.uniformBlur
-        if needsDepth, renderer.depthProvider == nil,
+        // A saved choice of Depth Pro 2 only counts while the model is on disk.
+        let wanted: CameraSettings.DepthModel =
+            settings.depthModel == .depthPro2 && depthPro2.isInstalled ? .depthPro2 : .depthAnythingV2
+        if needsDepth, renderer.depthProvider == nil || loadedDepthModel != wanted,
            let mtl = MTLCreateSystemDefaultDevice() {
-            renderer.depthProvider = DepthProvider(device: mtl)
+            renderer.depthProvider = Self.makeDepthSource(wanted, device: mtl)
+            loadedDepthModel = wanted
         }
+    }
+
+    /// The optional Depth Pro 2 model: downloading it, and whether it is here.
+    let depthPro2 = DepthPro2Installer()
+
+    /// The model the current depth provider was built for, so that changing the
+    /// picker, or installing or deleting Depth Pro 2, swaps it.
+    private var loadedDepthModel: CameraSettings.DepthModel?
+
+    /// Depth Pro 2 needs macOS 15, and a downloaded model can still fail to load.
+    /// Either way, fall back to Depth Anything so the blur still works.
+    private static func makeDepthSource(_ model: CameraSettings.DepthModel,
+                                        device: MTLDevice) -> (any DepthSource)? {
+        if model == .depthPro2, #available(macOS 15.0, *),
+           let provider = DepthPro2Provider(device: device) {
+            return provider
+        }
+        return DepthProvider(device: device)
     }
 
     /// Click-to-focus. Also aims exposure at that spot, and stands the automatic
@@ -201,9 +249,9 @@ final class CameraModel {
     /// click would appear to do nothing.
     func focus(at sensorPoint: CGPoint) {
         device.focus(at: sensorPoint)
-        // The device drops into one-shot AF so the focus holds; reflect that in
-        // the UI rather than leaving the picker lying about the mode.
-        settings.afMode = .auto
+        // The device drops into one-shot AF so the focus holds. Remember that
+        // here, so later pushes keep the hold and the panel can offer to end it.
+        focusHeld = true
         meteringSuspendedUntil = Date().addingTimeInterval(5)
         lastMeteredRect = nil
     }
@@ -234,79 +282,6 @@ final class CameraModel {
         device.meterExposure(on: rect)
     }
 
-    /// Refocus on the subject, following the strategy the camera's own vendor
-    /// firmware uses.
-    ///
-    /// The interesting part is what it does *not* do. Continuous AF re-decides
-    /// constantly and visibly hunts, so this is one-shot AUTO aimed at the face
-    /// box — and it only re-triggers when the face's *area* changes by more
-    /// than 40%, which is to say when you actually moved toward or away from
-    /// the lens. Someone walking past behind you does not shift your face box
-    /// enough to qualify, so the lens stays put. That hysteresis is why vendor
-    /// autofocus feels settled where continuous AF does not.
-    ///
-    /// The one-second cooldown mirrors the sleep the firmware takes after each
-    /// trigger, so refocuses cannot chain.
-    private func focusOnSubject(_ subject: SubjectInfo) {
-        guard settings.focusOnSubject, device.state.isLive else { return }
-
-        // While the lens is being driven by hand, drop the history: otherwise
-        // handing it back to autofocus with the subject unchanged compares
-        // against a stale area and skips the first trigger.
-        guard !settings.manualFocus else {
-            resetFocusTracking()
-            return
-        }
-        if let until = focusCooldownUntil, Date() < until { return }
-
-        // Caveat worth stating plainly: `bounds` is the segmentation's person
-        // box, not a face box. The upper-middle crop below is a stand-in for
-        // where a face sits within a person, which holds for one person facing
-        // the camera and degrades otherwise — a raised arm can grow the box,
-        // and with two people the crop can land between them.
-        //
-        // The vendor firmware runs a real face detector and applies the
-        // hysteresis to an actual face. Doing the same here needs Vision face
-        // detection wired into the analysis pass; until then, coverage is
-        // checked so a tiny or fragmented mask cannot drive the lens.
-        guard subject.coverage > 0.05 else { return }
-
-        let b = subject.bounds
-        let face = CGRect(x: b.minX + b.width * 0.2,
-                          y: b.minY,
-                          width: b.width * 0.6,
-                          height: max(b.height * 0.45, 0.05))
-
-        let area = face.width * face.height
-        guard area > 0 else { return }
-
-        if let last = lastFocusArea, last > 0 {
-            guard abs(area / last - 1.0) > 0.4 else { return }
-        }
-
-        lastFocusArea = area
-        focusCooldownUntil = Date().addingTimeInterval(1)
-        device.focus(on: face)
-
-        // The bridge just switched the lens to one-shot AUTO. Unless the
-        // setting follows, the next push of any unrelated control — sharpness,
-        // say — sees afMode still reading Continuous, treats it as a change and
-        // restores continuous hunting, undoing the hold. Tap-to-focus already
-        // does this; automatic tracking has to as well.
-        settings.afMode = .auto
-    }
-
-    /// Forget where focus last landed.
-    ///
-    /// The hysteresis compares against the last focused area, so a stale value
-    /// suppresses the first trigger after the situation has changed: reconnect
-    /// with the subject the same size and nothing fires, and the same happens
-    /// after driving the lens by hand and handing it back to autofocus.
-    func resetFocusTracking() {
-        lastFocusArea = nil
-        focusCooldownUntil = nil
-    }
-
     /// Cold settings changed; reboot the pipeline to pick them up.
     func applyColdChanges() async {
         guard !isStarting, !isRebooting else { return }
@@ -331,6 +306,50 @@ private final class FrameGate: @unchecked Sendable {
         return true
     }
     func exit() { lock.lock(); count -= 1; lock.unlock() }
+}
+
+/// Counts frames and times the stages each one passes through, and writes a
+/// line to the log every few seconds:
+///
+///     log stream --predicate 'subsystem == "com.openopal" && category == "perf"'
+///
+/// The status line's fps and latency come from the camera, so they say nothing
+/// about frames this app dropped or how long it held them. This does.
+private final class PipelineStats: @unchecked Sendable {
+    private let log = Logger(subsystem: "com.openopal", category: "perf")
+    private let lock = NSLock()
+    private var since = CFAbsoluteTimeGetCurrent()
+    private var shownCount = 0, droppedCount = 0
+    private var wait = 0.0, render = 0.0, total = 0.0, worst = 0.0
+
+    func dropped() {
+        lock.withLock { droppedCount += 1 }
+    }
+
+    func shown(waitMs: Double, renderMs: Double, totalMs: Double, maskMs: Double, depthMs: Double) {
+        lock.lock(); defer { lock.unlock() }
+        shownCount += 1
+        wait += waitMs; render += renderMs; total += totalMs
+        worst = max(worst, totalMs)
+
+        let now = CFAbsoluteTimeGetCurrent()
+        let elapsed = now - since
+        guard elapsed >= 3 else { return }
+        let n = Double(shownCount)
+        log.notice("""
+            shown \(n / elapsed, format: .fixed(precision: 1)) fps, \
+            dropped \(Double(self.droppedCount) / elapsed, format: .fixed(precision: 1)) fps, \
+            in app \(self.total / n, format: .fixed(precision: 0)) ms \
+            (worst \(self.worst, format: .fixed(precision: 0)), \
+            waiting for mask \(self.wait / n, format: .fixed(precision: 0)), \
+            render and present \(self.render / n, format: .fixed(precision: 0))), \
+            one mask \(maskMs, format: .fixed(precision: 0)) ms, \
+            one depth map \(depthMs, format: .fixed(precision: 0)) ms
+            """)
+        since = now
+        shownCount = 0; droppedCount = 0
+        wait = 0; render = 0; total = 0; worst = 0
+    }
 }
 
 /// CVPixelBuffer / MTLTexture aren't Sendable, but these specific instances are

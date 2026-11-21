@@ -91,7 +91,6 @@ struct RenderChecks {
         let settings = CameraSettings(preferences: preferences)
         settings.bokehEnabled = false
         settings.meterOnSubject = false
-        settings.focusOnSubject = false
         checkNeutralRamp(settings: settings)
     }
 }

@@ -137,17 +137,19 @@ optional depth-graded mode uses
 [Depth Anything V2](https://huggingface.co/apple/coreml-depth-anything-v2-small)
 for distance-based falloff.
 
+[Depth Pro 2](https://github.com/apple-aiml-research/ml-depth-pro-2) can stand
+in for it, so the two can be compared. It is experimental. Turn on
+"Depth-graded blur" and press "Download model": the app fetches 52 MB from Apple's
+Hugging Face repo into `~/Library/Application Support/OpenOpal/Models/`, and
+"Delete model" removes it. It needs macOS 15. Its weights are under Apple's
+research-only model licence, so the app never ships them.
+
 Linear-light decoding and display encoding use matching sRGB transfer curves.
 With bokeh off, the neutral video-range ramp must round-trip to its absolute
 display levels within one 8-bit step; comparison only against another processed
 frame would miss unwanted darkening.
 
 ### Autofocus
-
-“Follow face” uses the upper-middle of the segmented person's box as an estimate
-of where a face is, not a face detector. It refocuses when that area's size changes
-by more than 40%, with a one-second cooldown. This works best with one person
-facing the camera; raised arms or multiple people can confuse the estimate.
 
 “Limit range” restricts autofocus to the Far and Near lens positions you choose
 (0–255). The limit is restored after switching from manual to automatic focus,
