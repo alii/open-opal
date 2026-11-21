@@ -49,10 +49,9 @@ enum DepthPro2 {
 final class DepthPro2Provider: DepthSource, @unchecked Sendable {
 
     /// The model ships one function per input size. Measured on an M4 Max with
-    /// the small model: 640x360 takes 14ms on the GPU and 854x480 takes 27ms.
-    /// The Neural Engine takes 47ms and 182ms, so it is not an option. 640x360
-    /// costs about what Depth Anything does, and the depth map is blurred and
-    /// upsampled downstream anyway.
+    /// the small model, on the Neural Engine: 640x360 takes 47ms and 854x480
+    /// takes 182ms. So it is 640x360. The depth map is blurred and upsampled
+    /// downstream anyway.
     private static let function = "res_640x360"
 
     /// The inverse depth that maps to "nearest". The model's output is
@@ -96,10 +95,12 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
         self.device = device
 
         let config = MLModelConfiguration()
-        // Unlike Depth Anything, this one is far slower anywhere but the GPU
-        // (.all measured 36ms against 14ms), so it shares the GPU with the
-        // render passes.
-        config.computeUnits = .cpuAndGPU
+        // The Neural Engine, as for Depth Anything. The GPU is faster (14ms
+        // against 47ms) but encoding the graph there costs 20ms of CPU time per
+        // frame, 0.6 of a core at 30fps, on the GPU the render passes and the
+        // window server also need. The Neural Engine costs 1ms of CPU. Depth
+        // runs on every second frame and is never waited for, so 47ms fits.
+        config.computeUnits = .cpuAndNeuralEngine
         config.functionName = Self.function
 
         do {

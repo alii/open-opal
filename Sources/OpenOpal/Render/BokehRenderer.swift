@@ -163,6 +163,7 @@ final class BokehRenderer: @unchecked Sendable {
         private var _matte: MTLTexture?
         private var _matteBusy = false
         private var _depthBusy = false
+        private var _depthTick = 0
         private var _subject: SubjectInfo?
         private var _lastDepth: [Float] = []
         private var _lastDepthSize = (w: 0, h: 0)
@@ -182,9 +183,13 @@ final class BokehRenderer: @unchecked Sendable {
         }
         func endMatte() { lock.lock(); _matteBusy = false; lock.unlock() }
 
-        func tryBeginDepth() -> Bool {
+        /// True on every `interval`th call, and only if no depth pass is running.
+        /// The count lives here, under the lock, because in sync mode several
+        /// frames ask at once.
+        func tryBeginDepth(every interval: Int) -> Bool {
             lock.lock(); defer { lock.unlock() }
-            if _depthBusy { return false }
+            _depthTick &+= 1
+            if _depthTick % interval != 0 || _depthBusy { return false }
             _depthBusy = true
             return true
         }
@@ -371,14 +376,11 @@ final class BokehRenderer: @unchecked Sendable {
     /// a second to appear. Now ~15Hz, with the background-masked history
     /// (depth_smooth) doing the real work of killing the trail.
     private static let depthInterval = 2
-    private var frameIndex = 0
 
     private func kickOffAnalysisIfIdle(pixelBuffer: CVPixelBuffer, needsDepth: Bool) {
         let box = BufferBox(buffer: pixelBuffer)
         let store = analysis
         let onSubject = self.onSubject
-
-        frameIndex &+= 1
 
         // --- segmentation: every frame. It's what tracks you. ---
         if let matteProvider, store.tryBeginMatte() {
@@ -404,8 +406,14 @@ final class BokehRenderer: @unchecked Sendable {
         }
 
         // --- depth: occasionally, and only when bokeh actually needs it. ---
-        guard needsDepth, let depthProvider else { return }
-        guard frameIndex % Self.depthInterval == 0, store.tryBeginDepth() else { return }
+        if needsDepth { kickOffDepthIfIdle(box) }
+    }
+
+    /// Starts a depth pass for this frame unless one is running or it is not
+    /// this frame's turn. Never waited on: the render loop uses the newest map.
+    private func kickOffDepthIfIdle(_ box: BufferBox) {
+        let store = analysis
+        guard let depthProvider, store.tryBeginDepth(every: Self.depthInterval) else { return }
 
         Task.detached(priority: .userInitiated) {
             if let d = await depthProvider.depth(from: box.buffer) {
@@ -420,21 +428,25 @@ final class BokehRenderer: @unchecked Sendable {
     /// meter exposure on the person rather than the whole frame.
     var onSubject: (@Sendable (SubjectInfo) -> Void)?
 
-    /// Compute the mask (and optionally depth) for THIS frame, and wait for it.
+    /// Compute the mask for THIS frame, and wait for it.
     ///
     /// Costs latency, buys exact alignment: the mask describes the frame we're
     /// about to composite, not one from 60ms ago. This is the whole point of
     /// "sync" mode — the trailing edge is a synchronisation problem, not a
     /// filtering one.
+    ///
+    /// Depth is not waited for. It used to be, on every frame, and with three
+    /// frames in flight that was three depth passes at once: a profile showed
+    /// them using more than a core and filling the GPU, for no visible gain. The
+    /// mask is what has to line up with you. The depth map only describes the
+    /// room behind you, and a map that is two frames old still describes it.
     func analyzeNow(pixelBuffer: CVPixelBuffer, needsDepth: Bool) async {
         let box = BufferBox(buffer: pixelBuffer)
 
-        async let matteTask = matteProvider?.matte(from: box.buffer)
-        async let depthTask = needsDepth ? depthProvider?.depth(from: box.buffer) : nil
-        let (m, d) = await (matteTask, depthTask)
+        if needsDepth { kickOffDepthIfIdle(box) }
+        let m = await matteProvider?.matte(from: box.buffer)
 
-        analysis.publish(depth: d?.texture, matte: m?.texture)
-        if let d { analysis.storeDepthValues(d.values, w: d.width, h: d.height) }
+        analysis.publish(depth: nil, matte: m?.texture)
 
         if let m {
             let (values, dw, dh) = analysis.depthValues()

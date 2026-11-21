@@ -51,12 +51,13 @@ final class DepthProvider: DepthSource, @unchecked Sendable {
         }
 
         let config = MLModelConfiguration()
-        // Measured on an M4 Max: GPU 14ms, ANE 24ms, .all 17ms. The GPU is the
-        // fastest single accelerator, but it's also the one running our Metal
-        // passes, and we'd rather not have depth inference contend with the
-        // render loop for it. .all lets Core ML spread the graph across both and
-        // still clears the 33ms frame budget comfortably.
-        config.computeUnits = .all
+        // The Neural Engine, and nothing else. Measured on an M4 Max: GPU 14ms,
+        // ANE 24ms, .all 17ms. That made .all look like the best of both, but
+        // .all runs the graph on the GPU, and encoding it there costs 46ms of CPU
+        // time per frame: 1.4 cores at 30fps, on the GPU our Metal passes and
+        // the window server also need. On the Neural Engine it costs 1.8ms of
+        // CPU. Depth is never waited for, so the extra 7ms delays nothing.
+        config.computeUnits = .cpuAndNeuralEngine
 
         do {
             let mlModel = try MLModel(contentsOf: url, configuration: config)

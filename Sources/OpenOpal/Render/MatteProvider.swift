@@ -193,9 +193,13 @@ enum SubjectAnalysis {
         var minX = 1.0, minY = 1.0, maxX = 0.0, maxY = 0.0
         var hits = 0
 
-        for y in 0..<dh {
+        // Every 4th pixel each way. A median over a sixteenth of the subject is
+        // the same median, and sorting every pixel on every pass was costing a
+        // sixth of a core.
+        let step = 4
+        for y in stride(from: 0, to: dh, by: step) {
             let my = y * matte.height / dh
-            for x in 0..<dw {
+            for x in stride(from: 0, to: dw, by: step) {
                 let mx = x * matte.width / dw
                 guard matte.mask[my * matte.width + mx] > 128 else { continue }
 
@@ -208,7 +212,7 @@ enum SubjectAnalysis {
             }
         }
 
-        let coverage = Float(hits) / Float(dw * dh)
+        let coverage = Float(hits) / Float(max((dw / step) * (dh / step), 1))
         // Nobody there (or a few stray pixels) — don't refocus or re-meter on noise.
         guard coverage > 0.02, !subjectDepths.isEmpty else { return nil }
 
