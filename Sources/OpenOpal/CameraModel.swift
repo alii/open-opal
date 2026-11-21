@@ -165,6 +165,9 @@ final class CameraModel {
 
         if !feederPollStarted {
             feederPollStarted = true
+            // The feeder's poll below reconnects within a few seconds.
+            installer.onActivated = { [feeder] in feeder.disconnect() }
+            installer.updateIfOutdated()
             Task { [feeder] in
                 while true {
                     feeder.connectIfNeeded()
