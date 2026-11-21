@@ -38,12 +38,6 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
-      # Depth Pro 2, for comparing against the model above. Only present after
-      # scripts/fetch-models.sh --depth-pro-2: the weights are research-only.
-      - path: Models/depthpro2-s_w4.mlmodelc
-        type: folder
-        buildPhase: resources
-        optional: true
       - path: Assets/AppIcon.icns
         buildPhase: resources
     info:

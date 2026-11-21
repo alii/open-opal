@@ -455,13 +455,8 @@ struct Inspector: View {
                          : "Blur grows with distance, like a real lens — when the depth map is right. Adds ~20ms.",
                          tone: .hint)
 
-                    if !settings.uniformBlur && DepthPro2.isAvailable {
-                        Picker("Depth model", selection: $settings.depthModel) {
-                            ForEach(CameraSettings.DepthModel.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        Note("Depth Pro 2 remembers earlier frames, so the blur should hold steadier. Research-only weights.",
-                             tone: .hint)
+                    if !settings.uniformBlur && DepthPro2.isSupported {
+                        DepthPro2Controls(installer: camera.depthPro2, settings: settings)
                     }
 
                     Slider2("Aperture", value: $settings.aperture,
@@ -629,6 +624,74 @@ private struct Stepper2: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .frame(minWidth: 20, alignment: .trailing)
             Stepper("", value: $value, in: range).labelsHidden()
+        }
+    }
+}
+
+/// Download, status and delete for the optional Depth Pro 2 model, and the
+/// picker that switches to it once it is here.
+private struct DepthPro2Controls: View {
+    let installer: DepthPro2Installer
+    @Bindable var settings: CameraSettings
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Depth Pro 2")
+            Text("Experimental")
+                .font(.system(size: 9, weight: .semibold))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .foregroundStyle(.orange)
+                .background(.orange.opacity(0.18), in: Capsule())
+            Spacer()
+        }
+
+        switch installer.status {
+        case .notInstalled:
+            Note("A newer depth model from Apple that should hold the blur steadier. We are still testing it. It is a 52 MB download, and Apple licenses it for research use only.",
+                 tone: .hint)
+            Button("Download model") { installer.install() }
+                .glassButtonStyle()
+                .controlSize(.small)
+
+        case .downloading(let fraction):
+            ProgressView(value: fraction)
+                .controlSize(.small)
+            HStack {
+                Note("Downloading… \(Int((fraction * 100).rounded()))%", tone: .hint)
+                Spacer()
+                Button("Cancel") { installer.cancel() }
+                    .glassButtonStyle()
+                    .controlSize(.small)
+            }
+
+        case .preparing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Note("Downloaded. Getting it ready for this Mac…", tone: .hint)
+            }
+
+        case .installed:
+            Picker("Depth model", selection: $settings.depthModel) {
+                ForEach(CameraSettings.DepthModel.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Note(settings.depthModel == .depthPro2
+                 ? "Using Depth Pro 2. It is experimental, so the blur may look wrong. Switch back if it does."
+                 : "Depth Pro 2 is installed. Pick it to compare.",
+                 tone: .hint)
+            Button("Delete model") {
+                settings.depthModel = .depthAnythingV2
+                installer.delete()
+            }
+            .glassButtonStyle()
+            .controlSize(.small)
+
+        case .failed(let message):
+            Note("Depth Pro 2 could not be installed. \(message)", tone: .warning)
+            Button("Try again") { installer.install() }
+                .glassButtonStyle()
+                .controlSize(.small)
         }
     }
 }

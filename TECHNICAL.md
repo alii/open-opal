@@ -138,10 +138,11 @@ optional depth-graded mode uses
 for distance-based falloff.
 
 [Depth Pro 2](https://github.com/apple-aiml-research/ml-depth-pro-2) can stand
-in for it, so the two can be compared. Run
-`./scripts/fetch-models.sh --depth-pro-2` and rebuild, and a "Depth model" picker
-appears under "Depth-graded blur". It needs macOS 15. Its weights are under
-Apple's research-only model licence, so release builds do not include them.
+in for it, so the two can be compared. It is experimental. Turn on
+"Depth-graded blur" and press "Download model": the app fetches 52 MB from Apple's
+Hugging Face repo into `~/Library/Application Support/OpenOpal/Models/`, and
+"Delete model" removes it. It needs macOS 15. Its weights are under Apple's
+research-only model licence, so the app never ships them.
 
 Linear-light decoding and display encoding use matching sRGB transfer curves.
 With bokeh off, the neutral video-range ramp must round-trip to its absolute

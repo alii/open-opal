@@ -189,7 +189,9 @@ final class CameraModel {
         renderer.matteProvider?.setQuality(settings.matteQuality)
 
         let needsDepth = settings.bokehEnabled && !settings.uniformBlur
-        let wanted = settings.depthModel
+        // A saved choice of Depth Pro 2 only counts while the model is on disk.
+        let wanted: CameraSettings.DepthModel =
+            settings.depthModel == .depthPro2 && depthPro2.isInstalled ? .depthPro2 : .depthAnythingV2
         if needsDepth, renderer.depthProvider == nil || loadedDepthModel != wanted,
            let mtl = MTLCreateSystemDefaultDevice() {
             renderer.depthProvider = Self.makeDepthSource(wanted, device: mtl)
@@ -197,12 +199,15 @@ final class CameraModel {
         }
     }
 
+    /// The optional Depth Pro 2 model: downloading it, and whether it is here.
+    let depthPro2 = DepthPro2Installer()
+
     /// The model the current depth provider was built for, so that changing the
-    /// picker swaps it.
+    /// picker, or installing or deleting Depth Pro 2, swaps it.
     private var loadedDepthModel: CameraSettings.DepthModel?
 
-    /// Depth Pro 2 is optional: it needs macOS 15 and a model most builds do not
-    /// carry. Without either, fall back to Depth Anything so the blur still works.
+    /// Depth Pro 2 needs macOS 15, and a downloaded model can still fail to load.
+    /// Either way, fall back to Depth Anything so the blur still works.
     private static func makeDepthSource(_ model: CameraSettings.DepthModel,
                                         device: MTLDevice) -> (any DepthSource)? {
         if model == .depthPro2, #available(macOS 15.0, *),

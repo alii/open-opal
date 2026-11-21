@@ -7,22 +7,29 @@ import OSLog
 
 private let log = Logger(subsystem: "com.openopal", category: "depth")
 
-/// Where the optional Depth Pro 2 model lives, and whether this Mac can run it.
+/// The optional Depth Pro 2 model: what it is, where it comes from and where it
+/// is kept on this Mac.
 enum DepthPro2 {
-    /// The small model with a four-frame window, from
-    /// https://huggingface.co/apple/DepthPro2-coreml. Fetched only on request,
-    /// by `scripts/fetch-models.sh --depth-pro-2`: its weights are under Apple's
-    /// research-only model licence, so normal builds do not carry them.
+    /// The small model with a four-frame window.
     static let resourceName = "depthpro2-s_w4"
 
-    static var bundledModelURL: URL? {
-        Bundle.main.url(forResource: resourceName, withExtension: "mlmodelc")
+    /// Apple's own Core ML export. The app never ships these weights: they are
+    /// under Apple's research-only model licence, so DepthPro2Installer fetches
+    /// them only when someone asks.
+    static let downloadBase = URL(
+        string: "https://huggingface.co/apple/DepthPro2-coreml/resolve/main/\(resourceName).mlpackage")!
+
+    ///     ~/Library/Application Support/OpenOpal/Models/depthpro2-s_w4.mlmodelc
+    static var installedModelURL: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return support.appendingPathComponent("OpenOpal/Models/\(resourceName).mlmodelc", isDirectory: true)
     }
 
     /// The model keeps its memory of past frames in Core ML state, which needs
     /// macOS 15.
-    static var isAvailable: Bool {
-        if #available(macOS 15.0, *) { return bundledModelURL != nil }
+    static var isSupported: Bool {
+        if #available(macOS 15.0, *) { return true }
         return false
     }
 }
@@ -85,13 +92,8 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
     private var videoRange = vImage_YpCbCrToARGB()
     private var fullRange = vImage_YpCbCrToARGB()
 
-    init?(device: MTLDevice, modelURL: URL? = DepthPro2.bundledModelURL) {
+    init?(device: MTLDevice, modelURL: URL = DepthPro2.installedModelURL) {
         self.device = device
-
-        guard let modelURL else {
-            log.error("Depth Pro 2 not found in bundle — run scripts/fetch-models.sh --depth-pro-2")
-            return nil
-        }
 
         let config = MLModelConfiguration()
         // Unlike Depth Anything, this one is far slower anywhere but the GPU

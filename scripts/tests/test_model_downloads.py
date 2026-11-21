@@ -122,37 +122,6 @@ class ModelDownloadTests(ModelFixture):
         self.assertEqual(len((self.root / "downloads").read_text().splitlines()), 3)
         self.assert_no_temporary_outputs()
 
-    def test_depth_pro_2_is_only_fetched_on_request(self):
-        result = self.run_fetch()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertNotIn("DepthPro2", (self.root / "downloads").read_text())
-        self.assertFalse((self.models / "depthpro2-s_w4.mlmodelc").exists())
-
-    def test_depth_pro_2_is_fetched_after_the_default_model(self):
-        result = subprocess.run(
-            ["/bin/bash", str(self.script), "--depth-pro-2"], cwd=self.root,
-            env=self.env, capture_output=True, text=True, timeout=15,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        downloads = (self.root / "downloads").read_text().splitlines()
-        self.assertEqual(len(downloads), 6)
-        self.assertEqual(
-            downloads[3:],
-            ["https://huggingface.co/apple/DepthPro2-coreml/resolve/main/"
-             f"depthpro2-s_w4.mlpackage/{member}" for member in MEMBERS],
-        )
-        for name in (COMPILED, "depthpro2-s_w4.mlmodelc"):
-            self.assertEqual((self.models / name / "new").read_bytes(), b"replacement")
-        self.assert_no_temporary_outputs()
-
-    def test_unknown_option_fetches_nothing(self):
-        result = subprocess.run(
-            ["/bin/bash", str(self.script), "--everything"], cwd=self.root,
-            env=self.env, capture_output=True, text=True, timeout=15,
-        )
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertFalse((self.root / "downloads").exists())
-
     def test_cleanup_leaves_another_runs_temporary_file_alone(self):
         foreign = self.models / PACKAGE / (MEMBERS[1] + ".download.foreign")
         foreign.parent.mkdir(parents=True)

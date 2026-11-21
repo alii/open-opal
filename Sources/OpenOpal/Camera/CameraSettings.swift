@@ -211,8 +211,8 @@ final class CameraSettings {
     var uniformBlur = true { didSet { save() } }
 
     /// Which network estimates depth for depth-graded blur. Depth Pro 2 is here
-    /// to be compared against Depth Anything, and is only offered when its model
-    /// was fetched into the build (see DepthPro2).
+    /// to be compared against Depth Anything, and is only used once its model
+    /// has been downloaded (see DepthPro2Installer).
     var depthModel: DepthModel = .depthAnythingV2 { didSet { save() } }
 
     enum DepthModel: String, Codable, CaseIterable, Identifiable {
