@@ -101,7 +101,6 @@ struct MenuBarFlyout: View {
                         Button(camera.previewFrozen ? "Unfreeze Preview" : "Freeze Preview") {
                             camera.previewFrozen.toggle()
                         }
-                        Button("Toggle Advanced Settings") { camera.settings.showAdvanced.toggle() }
                         Button("Reset All Settings") {
                             camera.settings.reset()
                             camera.push()
@@ -145,8 +144,6 @@ struct MenuBarFlyout: View {
             Button("Trigger Autofocus") { camera.device.triggerAutofocus() }
                 .keyboardShortcut("f")
                 .disabled(!camera.device.state.isLive)
-            Button("Toggle Advanced Settings") { camera.settings.showAdvanced.toggle() }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
             Button("Freeze Preview") { camera.previewFrozen.toggle() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Button("Quit Open Opal") { NSApp.terminate(nil) }

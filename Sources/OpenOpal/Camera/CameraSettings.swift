@@ -168,10 +168,6 @@ final class CameraSettings {
 
     // MARK: - Bokeh (host-side; see BokehRenderer)
 
-    /// Most people want one switch and one slider. Everything else is here for
-    /// the person who actually wants to argue with the ISP.
-    var showAdvanced = false { didSet { save() } }
-
     var bokehEnabled = false { didSet { save() } }
 
     /// The one bokeh control a normal person should ever touch: 0 = off, 1 = as
@@ -300,7 +296,6 @@ final class CameraSettings {
         if let value = saved.brightness, (-10...10).contains(value) { brightness = value }
         if let value = saved.contrast, (-10...10).contains(value) { contrast = value }
         if let value = saved.saturation, (-10...10).contains(value) { saturation = value }
-        if let value = saved.showAdvanced { showAdvanced = value }
         if let value = saved.bokehEnabled { bokehEnabled = value }
         if let value = saved.syncBokeh { syncBokeh = value }
         if let value = saved.uniformBlur { uniformBlur = value }
@@ -344,7 +339,6 @@ final class CameraSettings {
             brightness: brightness,
             contrast: contrast,
             saturation: saturation,
-            showAdvanced: showAdvanced,
             bokehEnabled: bokehEnabled,
             syncBokeh: syncBokeh,
             uniformBlur: uniformBlur,
@@ -392,7 +386,6 @@ final class CameraSettings {
         var brightness: Int?
         var contrast: Int?
         var saturation: Int?
-        var showAdvanced: Bool?
         var bokehEnabled: Bool?
         var syncBokeh: Bool?
         var uniformBlur: Bool?

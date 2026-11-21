@@ -21,7 +21,6 @@ struct CameraSettingsPersistenceTests {
         initial.outputMode = .hd720
         initial.fps = 40
         initial.mirrorPreview = false
-        initial.showAdvanced = true
         initial.meterOnSubject = true
         precondition(initial.coldDirty)
 
@@ -32,7 +31,7 @@ struct CameraSettingsPersistenceTests {
         precondition(restored.manualWhiteBalance && restored.whiteBalanceK == 4200)
         precondition(restored.antiBanding == .hz50 && restored.meterOnSubject)
         precondition(restored.outputMode == .hd720 && restored.fps == 40)
-        precondition(!restored.mirrorPreview && restored.showAdvanced && !restored.coldDirty)
+        precondition(!restored.mirrorPreview && !restored.coldDirty)
 
         restored.reset()
         precondition(!restored.meterOnSubject && restored.antiBanding == .hz60)
