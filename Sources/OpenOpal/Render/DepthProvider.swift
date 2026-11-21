@@ -7,6 +7,11 @@ import Vision
 
 private let log = Logger(subsystem: "com.openopal", category: "depth")
 
+/// Anything that can turn a camera frame into a depth map for the renderer.
+protocol DepthSource: AnyObject, Sendable {
+    func depth(from pixelBuffer: CVPixelBuffer) async -> DepthProvider.Result?
+}
+
 /// Monocular depth via Apple's Core ML build of Depth Anything V2 (Small, F16),
 /// running on the Neural Engine.
 ///
@@ -27,7 +32,7 @@ private let log = Logger(subsystem: "com.openopal", category: "depth")
 ///     value changes even though the wall didn't move. That's "depth swim", and
 ///     it cannot be fixed here: rescaling a range that's already [0,1] is a
 ///     no-op. It's dealt with downstream, by temporal smoothing in the shader.
-final class DepthProvider: @unchecked Sendable {
+final class DepthProvider: DepthSource, @unchecked Sendable {
 
     private let device: MTLDevice
     private let model: VNCoreMLModel

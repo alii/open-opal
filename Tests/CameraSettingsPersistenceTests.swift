@@ -54,6 +54,9 @@ struct CameraSettingsPersistenceTests {
         precondition(!CameraSettings(preferences: preferences).uniformBlur)
         blur.matteQuality = .fast
         precondition(CameraSettings(preferences: preferences).matteQuality == .fast)
+        precondition(CameraSettings(preferences: preferences).depthModel == .depthAnythingV2)
+        blur.depthModel = .depthPro2
+        precondition(CameraSettings(preferences: preferences).depthModel == .depthPro2)
         blur.focusDistance = 0.7
         precondition(CameraSettings(preferences: preferences).focusDistance == 0.7)
         blur.autoFocusSubject = false

@@ -210,6 +210,17 @@ final class CameraSettings {
     /// essentially what Google Meet does, and it's why Meet looks clean.
     var uniformBlur = true { didSet { save() } }
 
+    /// Which network estimates depth for depth-graded blur. Depth Pro 2 is here
+    /// to be compared against Depth Anything, and is only offered when its model
+    /// was fetched into the build (see DepthPro2).
+    var depthModel: DepthModel = .depthAnythingV2 { didSet { save() } }
+
+    enum DepthModel: String, Codable, CaseIterable, Identifiable {
+        case depthAnythingV2 = "Depth Anything V2"
+        case depthPro2       = "Depth Pro 2"
+        var id: String { rawValue }
+    }
+
     /// How much compute to spend on the mask. With depth gone, we can afford the
     /// good one — and the mask is now the only thing standing between us and a
     /// clean edge, so it's worth every millisecond.
@@ -293,6 +304,7 @@ final class CameraSettings {
         if let value = saved.bokehEnabled { bokehEnabled = value }
         if let value = saved.syncBokeh { syncBokeh = value }
         if let value = saved.uniformBlur { uniformBlur = value }
+        if let value = saved.depthModel { depthModel = value }
         if let value = saved.matteQuality { matteQuality = value }
         if let value = saved.aperture, (1.4...16).contains(value) { aperture = value }
         if let value = saved.focusDistance, (0...1).contains(value) { focusDistance = value }
@@ -336,6 +348,7 @@ final class CameraSettings {
             bokehEnabled: bokehEnabled,
             syncBokeh: syncBokeh,
             uniformBlur: uniformBlur,
+            depthModel: depthModel,
             matteQuality: matteQuality,
             aperture: aperture,
             focusDistance: focusDistance,
@@ -383,6 +396,7 @@ final class CameraSettings {
         var bokehEnabled: Bool?
         var syncBokeh: Bool?
         var uniformBlur: Bool?
+        var depthModel: DepthModel?
         var matteQuality: MatteQuality?
         var aperture: Double?
         var focusDistance: Double?

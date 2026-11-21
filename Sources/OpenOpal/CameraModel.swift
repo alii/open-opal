@@ -189,10 +189,27 @@ final class CameraModel {
         renderer.matteProvider?.setQuality(settings.matteQuality)
 
         let needsDepth = settings.bokehEnabled && !settings.uniformBlur
-        if needsDepth, renderer.depthProvider == nil,
+        let wanted = settings.depthModel
+        if needsDepth, renderer.depthProvider == nil || loadedDepthModel != wanted,
            let mtl = MTLCreateSystemDefaultDevice() {
-            renderer.depthProvider = DepthProvider(device: mtl)
+            renderer.depthProvider = Self.makeDepthSource(wanted, device: mtl)
+            loadedDepthModel = wanted
         }
+    }
+
+    /// The model the current depth provider was built for, so that changing the
+    /// picker swaps it.
+    private var loadedDepthModel: CameraSettings.DepthModel?
+
+    /// Depth Pro 2 is optional: it needs macOS 15 and a model most builds do not
+    /// carry. Without either, fall back to Depth Anything so the blur still works.
+    private static func makeDepthSource(_ model: CameraSettings.DepthModel,
+                                        device: MTLDevice) -> (any DepthSource)? {
+        if model == .depthPro2, #available(macOS 15.0, *),
+           let provider = DepthPro2Provider(device: device) {
+            return provider
+        }
+        return DepthProvider(device: device)
     }
 
     /// Click-to-focus. Also aims exposure at that spot, and stands the automatic

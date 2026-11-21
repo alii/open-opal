@@ -137,6 +137,12 @@ optional depth-graded mode uses
 [Depth Anything V2](https://huggingface.co/apple/coreml-depth-anything-v2-small)
 for distance-based falloff.
 
+[Depth Pro 2](https://github.com/apple-aiml-research/ml-depth-pro-2) can stand
+in for it, so the two can be compared. Run
+`./scripts/fetch-models.sh --depth-pro-2` and rebuild, and a "Depth model" picker
+appears under "Depth-graded blur". It needs macOS 15. Its weights are under
+Apple's research-only model licence, so release builds do not include them.
+
 Linear-light decoding and display encoding use matching sRGB transfer curves.
 With bokeh off, the neutral video-range ramp must round-trip to its absolute
 display levels within one 8-bit step; comparison only against another processed

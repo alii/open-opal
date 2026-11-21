@@ -455,6 +455,15 @@ struct Inspector: View {
                          : "Blur grows with distance, like a real lens — when the depth map is right. Adds ~20ms.",
                          tone: .hint)
 
+                    if !settings.uniformBlur && DepthPro2.isAvailable {
+                        Picker("Depth model", selection: $settings.depthModel) {
+                            ForEach(CameraSettings.DepthModel.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        Note("Depth Pro 2 remembers earlier frames, so the blur should hold steadier. Research-only weights.",
+                             tone: .hint)
+                    }
+
                     Slider2("Aperture", value: $settings.aperture,
                             range: 1.4...16,
                             display: String(format: "f/%.1f", settings.aperture))

@@ -242,7 +242,7 @@ final class BokehRenderer: @unchecked Sendable {
         let buffer: CVPixelBuffer
     }
 
-    var depthProvider: DepthProvider?
+    var depthProvider: (any DepthSource)?
     var matteProvider: MatteProvider?
 
     // MARK: - Frame

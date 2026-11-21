@@ -6,15 +6,25 @@
 # own Core ML conversion of Depth Anything V2 Small. We take the F16 variant:
 # the INT8/palettized ones are smaller but no faster on the ANE (which computes
 # in fp16 regardless), and they lose accuracy.
+#
+# --depth-pro-2 also fetches Depth Pro 2 (small, four-frame window) from
+# https://huggingface.co/apple/DepthPro2-coreml, which adds a "Depth model"
+# picker to the app. It is opt-in because its weights are under the Apple
+# Machine Learning Research Model License: research use only. Read that licence
+# before putting them in a build you hand to anyone else.
 set -euo pipefail
+
+depth_pro_2=0
+for arg in "$@"; do
+  case "$arg" in
+    --depth-pro-2) depth_pro_2=1 ;;
+    *) echo "usage: $0 [--depth-pro-2]" >&2; exit 2 ;;
+  esac
+done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELS="$ROOT/Models"
 
-REPO="apple/coreml-depth-anything-v2-small"
-PKG="DepthAnythingV2SmallF16.mlpackage"
-BASE="https://huggingface.co/$REPO/resolve/main"
-COMPILED="$MODELS/${PKG%.mlpackage}.mlmodelc"
 download_tmp=""
 compile_tmp=""
 
@@ -45,40 +55,47 @@ FILES=(
 
 command -v xcrun >/dev/null || { echo "need xcrun: install Xcode command line tools"; exit 1; }
 
-echo "==> fetching $PKG from $REPO"
-for f in "${FILES[@]}"; do
-  dest="$MODELS/$PKG/$f"
-  if [ -s "$dest" ]; then
-    echo "    have $f"
-    continue
-  fi
-  mkdir -p "$(dirname "$dest")"
-  echo "    get  $f"
-  # -L: HF redirects the actual bytes to a CDN host.
-  # --fail: without it curl writes a 404 HTML body to the file and exits 0,
-  #         which would produce a corrupt package that only fails at compile.
-  download_tmp="$(mktemp "$dest.download.XXXXXX")"
-  curl --fail --location --progress-bar -o "$download_tmp" "$BASE/$PKG/$f"
-  if [ ! -s "$download_tmp" ]; then
-    echo "empty model member: $f" >&2
+# Fetch one .mlpackage from a Hugging Face repo and publish its compiled form.
+fetch_model() {
+  REPO="$1"
+  PKG="$2"
+  BASE="https://huggingface.co/$REPO/resolve/main"
+  COMPILED="$MODELS/${PKG%.mlpackage}.mlmodelc"
+
+  echo "==> fetching $PKG from $REPO"
+  for f in "${FILES[@]}"; do
+    dest="$MODELS/$PKG/$f"
+    if [ -s "$dest" ]; then
+      echo "    have $f"
+      continue
+    fi
+    mkdir -p "$(dirname "$dest")"
+    echo "    get  $f"
+    # -L: HF redirects the actual bytes to a CDN host.
+    # --fail: without it curl writes a 404 HTML body to the file and exits 0,
+    #         which would produce a corrupt package that only fails at compile.
+    download_tmp="$(mktemp "$dest.download.XXXXXX")"
+    curl --fail --location --progress-bar -o "$download_tmp" "$BASE/$PKG/$f"
+    if [ ! -s "$download_tmp" ]; then
+      echo "empty model member: $f" >&2
+      exit 1
+    fi
+    mv "$download_tmp" "$dest"
+    download_tmp=""
+  done
+
+  # Core ML can load an .mlpackage directly, but it compiles it on first use --
+  # a few seconds of stall. Shipping the prebuilt .mlmodelc skips that.
+  echo "==> compiling to .mlmodelc"
+  compile_tmp="$(mktemp -d "$MODELS/.compile.XXXXXX")"
+  xcrun coremlcompiler compile "$MODELS/$PKG" "$compile_tmp"
+  if [ ! -d "$compile_tmp/${PKG%.mlpackage}.mlmodelc" ]; then
+    echo "compiler did not produce a compiled model" >&2
     exit 1
   fi
-  mv "$download_tmp" "$dest"
-  download_tmp=""
-done
-
-# Core ML can load an .mlpackage directly, but it compiles it on first use --
-# a few seconds of stall. Shipping the prebuilt .mlmodelc skips that.
-echo "==> compiling to .mlmodelc"
-compile_tmp="$(mktemp -d "$MODELS/.compile.XXXXXX")"
-xcrun coremlcompiler compile "$MODELS/$PKG" "$compile_tmp"
-if [ ! -d "$compile_tmp/${PKG%.mlpackage}.mlmodelc" ]; then
-  echo "compiler did not produce a compiled model" >&2
-  exit 1
-fi
-if [ -e "$COMPILED" ]; then
-  # Exchange complete directories without making the published path disappear.
-  xcrun clang -x c - -o "$compile_tmp/exchange-model" <<'C'
+  if [ -e "$COMPILED" ]; then
+    # Exchange complete directories without making the published path disappear.
+    xcrun clang -x c - -o "$compile_tmp/exchange-model" <<'C'
 #include <stdio.h>
 int main(int argc, char **argv) {
   if (argc != 3) return 2;
@@ -87,10 +104,21 @@ int main(int argc, char **argv) {
   return 1;
 }
 C
-  "$compile_tmp/exchange-model" "$compile_tmp/${PKG%.mlpackage}.mlmodelc" "$COMPILED"
-else
-  mv "$compile_tmp/${PKG%.mlpackage}.mlmodelc" "$COMPILED"
+    "$compile_tmp/exchange-model" "$compile_tmp/${PKG%.mlpackage}.mlmodelc" "$COMPILED"
+  else
+    mv "$compile_tmp/${PKG%.mlpackage}.mlmodelc" "$COMPILED"
+  fi
+
+  rm -rf "$compile_tmp"
+  compile_tmp=""
+
+  echo "    compiled model -> $COMPILED"
+}
+
+fetch_model "apple/coreml-depth-anything-v2-small" "DepthAnythingV2SmallF16.mlpackage"
+if [ "$depth_pro_2" = 1 ]; then
+  fetch_model "apple/DepthPro2-coreml" "depthpro2-s_w4.mlpackage"
 fi
 
 echo
-echo "done. compiled model -> $COMPILED"
+echo "done."
