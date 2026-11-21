@@ -32,7 +32,6 @@ struct RenderSettings: Sendable {
     var uniformBlur: Bool
     var meterOnSubject: Bool
     var autoFocusSubject: Bool
-    var focusOnSubject: Bool
     var focusDistance: Double
     var aperture: Double
     var hexIris: Bool
@@ -48,7 +47,6 @@ struct RenderSettings: Sendable {
         // Focus tracking consumes the same subject analysis, so it has to be in
         // the snapshot too — otherwise "Follow face" silently does nothing
         // whenever bokeh and subject metering are both off.
-        focusOnSubject = s.focusOnSubject
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
@@ -193,7 +191,13 @@ final class BokehRenderer: @unchecked Sendable {
             _depthBusy = true
             return true
         }
-        func endDepth() { lock.lock(); _depthBusy = false; lock.unlock() }
+        func endDepth(ms: Double) {
+            lock.lock(); defer { lock.unlock() }
+            _depthBusy = false
+            _depthMs += 0.2 * (ms - _depthMs)
+        }
+        private var _depthMs = 0.0
+        var depthMs: Double { lock.lock(); defer { lock.unlock() }; return _depthMs }
 
         /// Keep the last depth values so a matte-only pass can still work out how
         /// far away the subject is.
@@ -280,7 +284,7 @@ final class BokehRenderer: @unchecked Sendable {
         // In sync mode the caller has already run analyzeNow() for this exact
         // frame, so there's nothing to kick off here.
         let syncing = settings.bokehEnabled && settings.syncBokeh
-        if !syncing && (settings.bokehEnabled || settings.meterOnSubject || settings.focusOnSubject) {
+        if !syncing && (settings.bokehEnabled || settings.meterOnSubject) {
             kickOffAnalysisIfIdle(pixelBuffer: pixelBuffer,
                                   needsDepth: settings.bokehEnabled && !settings.uniformBlur)
         }
@@ -416,13 +420,17 @@ final class BokehRenderer: @unchecked Sendable {
         guard let depthProvider, store.tryBeginDepth(every: Self.depthInterval) else { return }
 
         Task.detached(priority: .userInitiated) {
+            let start = CFAbsoluteTimeGetCurrent()
             if let d = await depthProvider.depth(from: box.buffer) {
                 store.publish(depth: d.texture, matte: nil)
                 store.storeDepthValues(d.values, w: d.width, h: d.height)
             }
-            store.endDepth()
+            store.endDepth(ms: (CFAbsoluteTimeGetCurrent() - start) * 1000)
         }
     }
+
+    /// What one depth map costs, in milliseconds. Zero until depth has run.
+    var depthMs: Double { analysis.depthMs }
 
     /// Fired whenever we get a fresh read on the subject. CameraModel uses it to
     /// meter exposure on the person rather than the whole frame.
@@ -437,8 +445,8 @@ final class BokehRenderer: @unchecked Sendable {
     ///
     /// Depth is not waited for. It used to be, on every frame, and with three
     /// frames in flight that was three depth passes at once: a profile showed
-    /// them using more than a core and filling the GPU, for no visible gain. The
-    /// mask is what has to line up with you. The depth map only describes the
+    /// them using more than a core of CPU to feed the GPU, for no visible gain.
+    /// The mask is what has to line up with you. The depth map only describes the
     /// room behind you, and a map that is two frames old still describes it.
     func analyzeNow(pixelBuffer: CVPixelBuffer, needsDepth: Bool) async {
         let box = BufferBox(buffer: pixelBuffer)

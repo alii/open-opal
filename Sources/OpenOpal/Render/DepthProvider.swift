@@ -51,13 +51,20 @@ final class DepthProvider: DepthSource, @unchecked Sendable {
         }
 
         let config = MLModelConfiguration()
-        // The Neural Engine, and nothing else. Measured on an M4 Max: GPU 14ms,
-        // ANE 24ms, .all 17ms. That made .all look like the best of both, but
-        // .all runs the graph on the GPU, and encoding it there costs 46ms of CPU
-        // time per frame: 1.4 cores at 30fps, on the GPU our Metal passes and
-        // the window server also need. On the Neural Engine it costs 1.8ms of
-        // CPU. Depth is never waited for, so the extra 7ms delays nothing.
-        config.computeUnits = .cpuAndNeuralEngine
+        // The GPU, not the Neural Engine. Vision runs the person mask on the
+        // Neural Engine, and the mask is the thing every frame waits for.
+        // Measured on an M4 Max at 30fps with the accurate mask and this model
+        // running on every second frame:
+        //
+        //     mask alone                31ms
+        //     this model on the ANE     60ms
+        //     this model on the GPU     30ms
+        //
+        // So sharing the ANE doubles the latency. The GPU has its own cost:
+        // encoding the graph takes 46ms of CPU time per map. That is why depth
+        // runs on every second frame, one map at a time, and is never waited for
+        // (see BokehRenderer.kickOffDepthIfIdle). .all behaves like the GPU here.
+        config.computeUnits = .cpuAndGPU
 
         do {
             let mlModel = try MLModel(contentsOf: url, configuration: config)
