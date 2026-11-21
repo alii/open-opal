@@ -3,16 +3,16 @@ import SwiftUI
 /// The settings panel: five tabs, one subject each, so nothing sits at the
 /// bottom of a long scroll.
 ///
-/// Every label says what the control does to the picture. Where a setting has
-/// named levels, the levels are described by their effect and their cost, not
-/// by words like "fast" or "accurate" that leave you guessing what changed.
+/// Controls are named for the setting they change, and the line under each one
+/// says what that setting does, with real numbers where there are any. Nothing
+/// is hidden behind a friendly word that leaves you guessing what changed.
 struct Inspector: View {
     @Environment(CameraModel.self) private var camera
     @AppStorage("inspector.tab") private var tab: Tab = .blur
 
     enum Tab: String, CaseIterable, Identifiable {
         case blur   = "Blur"
-        case light  = "Light"
+        case light  = "Exposure"
         case focus  = "Focus"
         case colour = "Colour"
         case camera = "Camera"
@@ -28,6 +28,8 @@ struct Inspector: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            // Five labels at the regular size are wider than the 400pt panel.
+            .controlSize(.small)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
@@ -43,6 +45,10 @@ struct Inspector: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
+                // Exactly as wide as the panel. Left to itself the scroll view
+                // grows to fit its widest row, and the panel then clips both
+                // edges of every card.
+                .containerRelativeFrame(.horizontal)
             }
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
@@ -57,179 +63,194 @@ struct Inspector: View {
         @Bindable var settings = settings
 
         Card("Background blur") {
-            Toggle("Blur what is behind me", isOn: $settings.bokehEnabled)
+            Toggle("Background blur", isOn: $settings.bokehEnabled)
 
             if settings.bokehEnabled {
-                Slider2("Strength", value: $settings.blurAmount,
+                Slider2("Simulated aperture", value: $settings.blurAmount,
                         range: 0...1,
-                        display: String(format: "%.0f%%", settings.blurAmount * 100))
+                        display: String(format: "f/%.1f", settings.aperture))
+                Note("f/1.4 gives the most blur and f/16 almost none. Blur radius scales with 1 / f-number.",
+                     tone: .hint)
             }
         }
 
         if settings.bokehEnabled {
-            Card("How the blur spreads") {
+            Card("Blur mode") {
                 Choice("", selection: $settings.uniformBlur, options: [
-                    (true, "Same everywhere"),
-                    (false, "More with distance"),
+                    (true, "Uniform"),
+                    (false, "Depth-graded"),
                 ])
                 Note(settings.uniformBlur
-                     ? "Everything behind you gets the same blur. The Mac only has to find your outline."
-                     : "Things further away get more blur, like a real lens. The Mac also has to work out how far away each part of the room is.",
+                     ? "One blur radius for everything outside the person mask. No depth model runs."
+                     : "Blur radius grows with distance from the focal plane. Needs a depth map, made by the model below on every second frame.",
                      tone: .hint)
 
                 if !settings.uniformBlur {
-                    Text("Distances are worked out by").foregroundStyle(.secondary)
+                    Text("Depth model").foregroundStyle(.secondary)
                     DepthModelRows(installer: camera.depthPro2, settings: settings)
 
-                    Toggle("Keep me sharp wherever I sit", isOn: $settings.autoFocusSubject)
-                    if !settings.autoFocusSubject {
-                        Slider2("Sharp distance", value: $settings.focusDistance,
+                    Toggle("Focal plane follows subject", isOn: $settings.autoFocusSubject)
+                    if settings.autoFocusSubject {
+                        Note("The focal plane is the median depth under the person mask.", tone: .hint)
+                    } else {
+                        Slider2("Focal plane depth", value: $settings.focusDistance,
                                 range: 0...1,
-                                display: String(format: "%.0f%%", settings.focusDistance * 100))
-                        Note("0% is the nearest thing in view and 100% is the furthest.", tone: .hint)
+                                display: String(format: "%.2f", settings.focusDistance))
+                        Note("Normalised depth: 0 is nearest, 1 is furthest.", tone: .hint)
                     }
                 }
             }
 
-            Card("Your outline") {
-                Choice("Outline detail", selection: $settings.matteQuality, options: [
-                    (.fast, "Rough"), (.balanced, "Medium"), (.accurate, "Fine"),
+            Card("Person mask") {
+                Choice("Vision segmentation quality", selection: $settings.matteQuality, options: [
+                    (.fast, "Fast"), (.balanced, "Balanced"), (.accurate, "Accurate"),
                 ])
                 Note(settings.matteQuality.effect
                      + (camera.maskMs > 0
-                        ? String(format: " Finding your outline takes %.0f ms per frame right now.", camera.maskMs)
+                        ? String(format: " Measured now: %.0f ms per mask.", camera.maskMs)
                         : ""),
                      tone: .hint)
 
-                Toggle("Wait for each frame's outline", isOn: $settings.syncBokeh)
+                Toggle("Sync mask to frame", isOn: $settings.syncBokeh)
                 Note(settings.syncBokeh
-                     ? "Each frame waits for its own outline, so the blur stays lined up with you. This delays the video by the time above."
-                     : "Each frame uses the newest outline already made. No added delay, but the blur can trail behind you when you move.",
+                     ? "Each frame is held until its own mask is ready, so mask and frame match exactly. Adds one mask time to latency."
+                     : "Frames are not held. Each uses the newest finished mask, which is 1 to 2 frames old, so the blur edge lags fast movement.",
                      tone: .hint)
             }
 
-            Card("Blurred lights") {
-                Slider2("Glow on bright lights", value: $settings.highlightBloom,
+            Card("Bokeh highlights") {
+                Slider2("Highlight bloom", value: $settings.highlightBloom,
                         range: 0...1,
                         display: String(format: "%.0f%%", settings.highlightBloom * 100))
-                Choice("Shape of blurred lights", selection: $settings.apertureShape, options: [
-                    (.circular, "Round"), (.hexagonal, "Six-sided"),
+                Note("How much brighter pixels count in the blur, which is what makes lights turn into discs.",
+                     tone: .hint)
+                Choice("Aperture shape", selection: $settings.apertureShape, options: [
+                    (.circular, "Circular"), (.hexagonal, "Hexagonal"),
                 ])
             }
 
             Button("Reset blur settings") { settings.resetBokeh() }
-                .glassButtonStyle()
+                .buttonStyle(.bordered)
                 .controlSize(.small)
         }
     }
 
-    // MARK: - Light: how bright the picture is
+    // MARK: - Exposure
 
     @ViewBuilder
     private func light(_ settings: CameraSettings) -> some View {
         @Bindable var settings = settings
 
-        Card("Brightness") {
-            Choice("Brightness is set by", selection: $settings.autoExposure, options: [
-                (true, "The camera"), (false, "Me"),
+        Card("Exposure") {
+            Choice("", selection: $settings.autoExposure, options: [
+                (true, "Auto"), (false, "Manual"),
             ])
             .onChange(of: settings.autoExposure) { camera.push() }
 
             if settings.autoExposure {
-                Slider2("Darker or brighter", value: Binding(
+                Slider2("Exposure compensation", value: Binding(
                     get: { Double(settings.evCompensation) },
                     set: { settings.evCompensation = Int($0); camera.push() }
                 ), range: -9...9, step: 1,
                 display: settings.evCompensation > 0
                     ? "+\(settings.evCompensation)" : "\(settings.evCompensation)")
 
-                Toggle("Hold the brightness where it is now", isOn: $settings.aeLock)
+                Toggle("AE lock", isOn: $settings.aeLock)
                     .onChange(of: settings.aeLock) { camera.push() }
+                Note("Freezes shutter and ISO at their current values.", tone: .hint)
 
-                Toggle("Set brightness from my face", isOn: $settings.meterOnSubject)
-                Note("Stops a bright window behind you leaving your face dark. The Mac finds your outline to do this, even with blur off.",
+                Toggle("Meter on subject", isOn: $settings.meterOnSubject)
+                Note("Sets the auto-exposure region to the person mask's bounding box. The mask runs for this even with blur off.",
                      tone: .hint)
             } else {
-                Slider2("Shutter time", value: Binding(
+                Slider2("Shutter", value: Binding(
                     get: { Double(settings.exposureUs) },
                     set: { settings.exposureUs = Int($0); camera.push() }
                 ), range: 100...Double(settings.maxExposureUs),
                 display: "\(settings.shutterFraction) s")
-                Note("Longer is brighter, but movement smears.", tone: .hint)
 
-                Slider2("Sensor gain (ISO)", value: Binding(
+                Slider2("ISO", value: Binding(
                     get: { Double(settings.iso) },
                     set: { settings.iso = Int($0); camera.push() }
                 ), range: 100...1600, step: 50, display: "\(settings.iso)")
-                Note("Higher is brighter, but grainier.", tone: .hint)
+                Note("Shutter can be at most one frame interval (\(settings.maxExposureUs) µs at \(settings.fps) fps).",
+                     tone: .hint)
             }
         }
 
-        Card("Flickering room lights") {
-            Choice("Mains frequency where you are", selection: $settings.antiBanding,
+        Card("Anti-banding") {
+            Choice("Mains frequency", selection: $settings.antiBanding,
                    options: CameraSettings.AntiBanding.allCases.map { ($0, $0.rawValue) })
                 .onChange(of: settings.antiBanding) { camera.push() }
-            Note("Room lights pulse with the mains. Matching it stops dark bands rolling up the picture. \(settings.antiBanding.hint).",
+            Note("Locks exposure to multiples of the mains cycle so lights do not band. \(settings.antiBanding.hint).",
                  tone: .hint)
         }
     }
 
     // MARK: - Focus: the lens
 
+    /// One list, one answer. Manual focus and the camera's autofocus modes are
+    /// stored separately, but they are one decision, and showing them as
+    /// separate switches let them read as if they disagreed.
     @ViewBuilder
     private func focus(_ settings: CameraSettings) -> some View {
         @Bindable var settings = settings
+        let choice = FocusChoice(settings)
 
         Card("Focus") {
-            Choice("Focus is set by", selection: $settings.manualFocus, options: [
-                (false, "The camera"), (true, "Me"),
-            ])
-            .onChange(of: settings.manualFocus) { camera.push() }
+            Picker("Focus mode", selection: Binding(
+                get: { choice },
+                set: { $0.apply(to: settings); camera.resumeAutofocus() }
+            )) {
+                ForEach(FocusChoice.allCases) { Text($0.label).tag($0) }
+            }
 
-            if settings.manualFocus {
+            if camera.focusHeld && choice.cameraDriven && choice != .whenAsked {
+                Note("Holding the focus set by your click on the picture (one-shot AF on that region).", tone: .hint)
+                Button {
+                    camera.resumeAutofocus()
+                } label: {
+                    Text("Release and return to this mode").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else {
+                Note(choice.effect, tone: .hint)
+            }
+
+            if choice == .byHand {
                 Slider2("Lens position", value: Binding(
                     get: { Double(settings.lensPosition) },
                     set: { settings.lensPosition = Int($0); camera.push() }
                 ), range: 0...255, step: 1, display: "\(settings.lensPosition)")
-                Note("0 focuses far away and 255 focuses up close.", tone: .hint)
-            } else {
-                Picker("The camera refocuses", selection: $settings.afMode) {
-                    ForEach(CameraSettings.AFMode.allCases) { Text($0.behaviour).tag($0) }
-                }
-                .onChange(of: settings.afMode) { camera.push() }
-                Note(settings.afMode.effect, tone: .hint)
-
+                Note("Lens position 0 to 255. 0 is infinity and 255 is the closest focus.", tone: .hint)
+            } else if choice.cameraDriven {
                 Button {
                     camera.device.triggerAutofocus()
                 } label: {
-                    Label("Refocus now", systemImage: "camera.metering.center.weighted")
+                    Label("Trigger autofocus", systemImage: "camera.metering.center.weighted")
                         .frame(maxWidth: .infinity)
                 }
-                .glassButtonStyle()
+                .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                Note("You can also click anywhere on the picture to focus there.", tone: .hint)
+                Note("Clicking the picture sets the AF and AE region there, runs one-shot AF and holds the result.",
+                     tone: .hint)
             }
         }
 
-        if !settings.manualFocus {
-            Card("Stop the focus wandering") {
-                // One-shot AF on the face box, re-triggered only when your
-                // apparent size changes a lot. Stops the lens reacting to
-                // background movement.
-                Toggle("Refocus only when I move closer or further away", isOn: $settings.focusOnSubject)
-                    .onChange(of: settings.focusOnSubject) { camera.push() }
-                Note("The camera focuses on your face once, then leaves the lens alone until your size in the picture changes a lot.",
-                     tone: .hint)
-
+        if choice.cameraDriven {
+            Card("AF range limit") {
                 // Unrestricted AF hunts the whole lens travel, so a gesture or
                 // someone walking past sends it racking to the far wall and
                 // back. A desk sits in a narrow band.
-                Toggle("Limit how far the lens may move", isOn: $settings.limitAfRange)
+                Toggle("Limit AF lens range", isOn: $settings.limitAfRange)
                     .onChange(of: settings.limitAfRange) { camera.push() }
+                Note("Autofocus may only search between the two lens positions below, so it cannot rack to the far wall and back.",
+                     tone: .hint)
 
                 if settings.limitAfRange {
-                    Slider2("Furthest lens position", value: Binding(
+                    Slider2("Far limit", value: Binding(
                         get: { Double(settings.afRangeInfinity) },
                         set: {
                             settings.afRangeInfinity = min(Int($0), settings.afRangeMacro)
@@ -237,7 +258,7 @@ struct Inspector: View {
                         }
                     ), range: 0...255, step: 1, display: "\(settings.afRangeInfinity)")
 
-                    Slider2("Closest lens position", value: Binding(
+                    Slider2("Near limit", value: Binding(
                         get: { Double(settings.afRangeMacro) },
                         set: {
                             settings.afRangeMacro = max(Int($0), settings.afRangeInfinity)
@@ -247,7 +268,7 @@ struct Inspector: View {
 
                     // The live lens position is the only way to pick sensible
                     // bounds: focus on yourself, read it, then bracket it.
-                    Note("The lens is at \(camera.device.telemetry.lensPosition) now. Focus on yourself, then set the two limits either side of that number.",
+                    Note("Lens position now: \(camera.device.telemetry.lensPosition). Focus on yourself, then set the limits either side of it.",
                          tone: .hint)
                 }
             }
@@ -261,27 +282,26 @@ struct Inspector: View {
         @Bindable var settings = settings
 
         Card("White balance") {
-            Choice("White balance is set by", selection: $settings.manualWhiteBalance, options: [
-                (false, "The camera"), (true, "Me"),
+            Choice("", selection: $settings.manualWhiteBalance, options: [
+                (false, "Auto"), (true, "Manual"),
             ])
             .onChange(of: settings.manualWhiteBalance) { camera.push() }
 
             if settings.manualWhiteBalance {
-                Slider2("Colour of your room light", value: Binding(
+                Slider2("Colour temperature", value: Binding(
                     get: { Double(settings.whiteBalanceK) },
                     set: { settings.whiteBalanceK = Int($0); camera.push() }
                 ), range: 2000...10000, step: 100, display: "\(settings.whiteBalanceK) K")
-                Note("Lower numbers make the picture bluer. Higher numbers make it more orange.", tone: .hint)
             } else {
-                Picker("Kind of light", selection: $settings.awbMode) {
+                Picker("AWB mode", selection: $settings.awbMode) {
                     ForEach(CameraSettings.AWBMode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .onChange(of: settings.awbMode) { camera.push() }
             }
         }
 
-        Card("Picture") {
-            Stepper2("Colour strength", value: Binding(
+        Card("ISP tone") {
+            Stepper2("Saturation", value: Binding(
                 get: { settings.saturation },
                 set: { settings.saturation = $0; camera.push() }), range: -10...10)
             Stepper2("Contrast", value: Binding(
@@ -290,52 +310,53 @@ struct Inspector: View {
             Stepper2("Brightness", value: Binding(
                 get: { settings.brightness },
                 set: { settings.brightness = $0; camera.push() }), range: -10...10)
+            Note("Applied by the camera's ISP. Range -10 to 10, 0 is neutral.", tone: .hint)
         }
 
-        Card("Sharpness and grain") {
-            Stepper2("Edge sharpening", value: Binding(
+        Card("ISP detail") {
+            Stepper2("Sharpness", value: Binding(
                 get: { settings.sharpness },
                 set: { settings.sharpness = $0; camera.push() }), range: 0...4)
-            Stepper2("Grain smoothing", value: Binding(
+            Stepper2("Luma denoise", value: Binding(
                 get: { settings.lumaDenoise },
                 set: { settings.lumaDenoise = $0; camera.push() }), range: 0...4)
-            Stepper2("Colour speckle smoothing", value: Binding(
+            Stepper2("Chroma denoise", value: Binding(
                 get: { settings.chromaDenoise },
                 set: { settings.chromaDenoise = $0; camera.push() }), range: 0...4)
-            Note("The camera does all three. 0 is off and 4 is the most. More smoothing also blurs fine detail.",
-                 tone: .hint)
+            Note("Applied by the camera's ISP. Range 0 to 4, 0 is off.", tone: .hint)
         }
     }
 
-    // MARK: - Camera: video size, orientation and the virtual camera
+    // MARK: - Camera: output format, orientation and the virtual camera
 
     @ViewBuilder
     private func cameraSetup(_ settings: CameraSettings) -> some View {
         @Bindable var settings = settings
 
-        Card("Video size and speed") {
-            Choice("Size", selection: $settings.outputMode,
+        Card("Output") {
+            Choice("Resolution", selection: $settings.outputMode,
                    options: CameraSettings.OutputMode.allCases.map { ($0, $0.rawValue) })
 
-            Stepper("\(settings.fps) frames per second", value: $settings.fps,
+            Stepper("\(settings.fps) fps", value: $settings.fps,
                     in: 5...settings.outputMode.maxFps, step: 5)
 
+            Note("The sensor always captures 3840×2160. 1080p and 720p are scaled on the camera's ISP before USB.",
+                 tone: .hint)
             if let caution = settings.outputMode.caution {
                 Note(caution, tone: .warning)
             }
         }
 
-        Card("Which way up") {
-            Toggle("Turn the picture upside down", isOn: $settings.rotate180)
-            Note("The C1's sensor is fitted upside down, so this is normally on. The camera does the turning.",
+        Card("Orientation") {
+            Toggle("Rotate 180°", isOn: $settings.rotate180)
+            Note("Done on the camera's ISP. The C1's sensor is mounted upside down, so this is normally on.",
                  tone: .hint)
 
-            Toggle("Mirror my preview", isOn: $settings.mirrorPreview)
-            Note("Only this preview is flipped. Other people still see you the right way round.",
-                 tone: .hint)
+            Toggle("Mirror preview", isOn: $settings.mirrorPreview)
+            Note("Preview only. The virtual camera output is never mirrored.", tone: .hint)
         }
 
-        // Size, speed and rotation are baked into the device pipeline, so
+        // Resolution, fps and rotation are baked into the device pipeline, so
         // changing them means rebooting the Myriad. Make that an explicit act
         // rather than a surprise mid-call black frame.
         if settings.coldDirty {
@@ -345,20 +366,20 @@ struct Inspector: View {
                 Label("Restart camera to apply", systemImage: "arrow.clockwise")
                     .frame(maxWidth: .infinity)
             }
-            .glassButtonStyle(prominent: true)
+            .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
 
-        Card("Use in other apps") {
+        Card("Virtual camera") {
             virtualCamera
         }
 
-        Button("Reset every setting") {
+        Button("Reset all settings") {
             camera.settings.reset()
             camera.settings.resetBokeh()
             camera.push()
         }
-        .glassButtonStyle()
+        .buttonStyle(.bordered)
         .controlSize(.small)
     }
 
@@ -374,7 +395,7 @@ struct Inspector: View {
             if camera.autoLaunch.status == .requiresApproval {
                 Note("Allow OpenOpal Launcher in Login Items to enable automatic startup.", tone: .warning)
                 Button("Open Login Items") { camera.autoLaunch.openLoginItems() }
-                    .glassButtonStyle()
+                    .buttonStyle(.bordered)
             }
             if let error = camera.autoLaunch.error {
                 Note(error, tone: .warning)
@@ -408,7 +429,7 @@ struct Inspector: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             Button("Try again") { camera.installer.install() }
-                .glassButtonStyle()
+                .buttonStyle(.bordered)
                 .controlSize(.small)
         case .unknown:
             if !camera.installer.isIncludedInApp {
@@ -423,7 +444,7 @@ struct Inspector: View {
                     Label("Install virtual camera", systemImage: "arrow.down.circle")
                         .frame(maxWidth: .infinity)
                 }
-                .glassButtonStyle(prominent: true)
+                .buttonStyle(.borderedProminent)
                 .controlSize(.small)
             }
         }
@@ -433,33 +454,65 @@ struct Inspector: View {
 // MARK: - What the named levels do
 
 private extension CameraSettings.MatteQuality {
-    /// What this level changes in the picture and what it costs.
+    /// What the quality level of VNGeneratePersonSegmentationRequest changes:
+    /// the size of the mask it returns, and so how long it takes. Sizes and
+    /// times were measured on an M4 Max, one mask at a time at 30fps.
     var effect: String {
         switch self {
-        case .fast:     "Blocky edges around you. The least work for the Mac."
-        case .balanced: "Smoother edges around you."
-        case .accurate: "The outline follows hair and glasses. The most work for the Mac."
+        case .fast:     "Mask is 256×192. About 8 ms on an M4 Max."
+        case .balanced: "Mask is 512×384. About 20 ms on an M4 Max."
+        case .accurate: "Mask is 2016×1512. About 31 ms on an M4 Max."
         }
     }
 }
 
-private extension CameraSettings.AFMode {
-    var behaviour: String {
-        switch self {
-        case .auto:            "Only when asked"
-        case .continuousVideo: "All the time"
-        case .macro:           "Only for close-up things"
-        case .edof:            "Never (fixed lens)"
+/// Every way the lens can be driven, as one list.
+private enum FocusChoice: String, CaseIterable, Identifiable {
+    case always, whenAsked, closeUp, fixed, byHand
+    var id: String { rawValue }
+
+    @MainActor init(_ settings: CameraSettings) {
+        if settings.manualFocus { self = .byHand; return }
+        self = switch settings.afMode {
+        case .continuousVideo: .always
+        case .auto:            .whenAsked
+        case .macro:           .closeUp
+        case .edof:            .fixed
         }
     }
 
-    /// What the camera's lens does in this mode.
+    @MainActor func apply(to settings: CameraSettings) {
+        settings.manualFocus = self == .byHand
+        switch self {
+        case .always:    settings.afMode = .continuousVideo
+        case .whenAsked: settings.afMode = .auto
+        case .closeUp:   settings.afMode = .macro
+        case .fixed:     settings.afMode = .edof
+        case .byHand:    break
+        }
+    }
+
+    /// The camera moves the lens itself, so refocusing and limits apply.
+    var cameraDriven: Bool { self == .always || self == .whenAsked || self == .closeUp }
+
+    var label: String {
+        switch self {
+        case .always:    "Continuous autofocus"
+        case .whenAsked: "One-shot autofocus"
+        case .closeUp:   "Macro autofocus"
+        case .fixed:     "Extended depth of field (EDOF)"
+        case .byHand:    "Manual lens position"
+        }
+    }
+
+    /// What the camera does in this mode.
     var effect: String {
         switch self {
-        case .auto:            "The lens stays put until you press Refocus or click the picture."
-        case .continuousVideo: "The lens keeps adjusting on its own to hold the picture sharp."
-        case .macro:           "The lens only searches its close-up range."
-        case .edof:            "The lens holds one position that keeps most distances fairly sharp."
+        case .always:    "depthai CONTINUOUS_VIDEO. The camera's AF loop runs all the time and moves the lens whenever sharpness drops."
+        case .whenAsked: "depthai AUTO. The lens moves only on a trigger: the button below, or a click on the picture."
+        case .closeUp:   "depthai MACRO. Autofocus tuned for close-up subjects."
+        case .fixed:     "depthai EDOF. The lens is parked where the widest range of distances stays acceptably sharp."
+        case .byHand:    "Autofocus is off. The lens goes to the position you set."
         }
     }
 }
@@ -607,22 +660,22 @@ private struct DepthModelRows: View {
 
     var body: some View {
         ModelRow(name: "Depth Anything V2", experimental: false, selected: !usingDepthPro2,
-                 detail: "Built in. Looks at one frame at a time.") {
+                 detail: "Small, 518×392 input. One frame at a time. Relative depth, rescaled on every frame. Built in.") {
             settings.depthModel = .depthAnythingV2
         }
 
         if DepthPro2.isSupported {
             ModelRow(name: "Depth Pro 2", experimental: true, selected: usingDepthPro2,
-                     detail: "New from Apple. Also looks at the last 3 frames, so the blur should flicker less. We are still testing it, so it may look wrong.",
+                     detail: "Small, 640×360 input. Uses the last 4 frames, and outputs metric depth with a fixed scale. Untested against Depth Anything, so it may look worse.",
                      select: installer.isInstalled ? { settings.depthModel = .depthPro2 } : nil)
 
             Group {
                 switch installer.status {
                 case .notInstalled:
-                    Note("Not on this Mac yet. It is a 52 MB download from Apple, licensed for research use only.",
+                    Note("Not downloaded. 52 MB from huggingface.co/apple/DepthPro2-coreml, under Apple's research-only model licence.",
                          tone: .hint)
                     Button("Download Depth Pro 2") { installer.install() }
-                        .glassButtonStyle()
+                        .buttonStyle(.bordered)
 
                 case .downloading(let fraction):
                     ProgressView(value: fraction)
@@ -630,30 +683,30 @@ private struct DepthModelRows: View {
                         Note("Downloading… \(Int((fraction * 100).rounded()))%", tone: .hint)
                         Spacer()
                         Button("Cancel") { installer.cancel() }
-                            .glassButtonStyle()
+                            .buttonStyle(.bordered)
                     }
 
                 case .preparing:
                     HStack(spacing: 6) {
                         ProgressView()
-                        Note("Downloaded. Getting it ready for this Mac…", tone: .hint)
+                        Note("Downloaded. Compiling the Core ML model…", tone: .hint)
                     }
 
                 case .installed:
                     HStack {
-                        Note("Downloaded and ready.", tone: .hint)
+                        Note("Downloaded (52 MB).", tone: .hint)
                         Spacer()
                         Button("Delete download") {
                             settings.depthModel = .depthAnythingV2
                             installer.delete()
                         }
-                        .glassButtonStyle()
+                        .buttonStyle(.bordered)
                     }
 
                 case .failed(let message):
                     Note("Depth Pro 2 could not be installed. \(message)", tone: .warning)
                     Button("Try again") { installer.install() }
-                        .glassButtonStyle()
+                        .buttonStyle(.bordered)
                 }
             }
             .controlSize(.small)

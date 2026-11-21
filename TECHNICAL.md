@@ -151,11 +151,6 @@ frame would miss unwanted darkening.
 
 ### Autofocus
 
-“Follow face” uses the upper-middle of the segmented person's box as an estimate
-of where a face is, not a face detector. It refocuses when that area's size changes
-by more than 40%, with a one-second cooldown. This works best with one person
-facing the camera; raised arms or multiple people can confuse the estimate.
-
 “Limit range” restricts autofocus to the Far and Near lens positions you choose
 (0–255). The limit is restored after switching from manual to automatic focus,
 changing autofocus mode, or focusing on a region. Turning the limit off restores

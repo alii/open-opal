@@ -314,7 +314,9 @@ final class OpalDevice {
 
     // MARK: - Controls
 
-    func apply(_ s: CameraSettings) {
+    /// `holdingFocus` keeps the lens where a click put it, whatever mode is
+    /// chosen, by asking for one-shot autofocus.
+    func apply(_ s: CameraSettings, holdingFocus: Bool = false) {
         guard let handle else { return }
         var c = OpalControls()
 
@@ -335,6 +337,7 @@ final class OpalDevice {
         case .macro:           OPAL_AF_MACRO
         case .edof:            OPAL_AF_EDOF
         }
+        if holdingFocus { c.afMode = OPAL_AF_AUTO }
 
         c.manualWhiteBalance = s.manualWhiteBalance
         c.whiteBalanceK      = Int32(s.whiteBalanceK)
@@ -383,19 +386,6 @@ final class OpalDevice {
     }
 
     /// Tap-to-focus: point the AF and AE metering at a spot in the frame.
-    /// Point AF at an explicit box, leaving exposure metering alone.
-    /// Used by subject tracking: a tap means "expose and focus here", but
-    /// automatic tracking should not silently re-aim metering the user may
-    /// have pointed elsewhere or switched off.
-    func focus(on rect: CGRect) {
-        guard let handle else { return }
-        opal_set_af_region(handle,
-                              Float(max(0, min(1, rect.minX))),
-                              Float(max(0, min(1, rect.minY))),
-                              Float(max(0.02, min(1, rect.width))),
-                              Float(max(0.02, min(1, rect.height))))
-    }
-
     func focus(at point: CGPoint, boxSize: CGFloat = 0.18) {
         guard let handle else { return }
         let half = boxSize / 2
