@@ -488,10 +488,25 @@ private struct Card<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .toggleStyle(.switch)
+        .toggleStyle(TrailingSwitch())
         .controlSize(.small)
         .font(.system(size: 12))
         .background(.primary.opacity(0.05), in: .rect(cornerRadius: 14))
+    }
+}
+
+/// A switch with its label on the left and the switch at the right edge, so a
+/// column of them lines up whatever the label lengths.
+private struct TrailingSwitch: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            configuration.label
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 12)
+            Toggle("", isOn: configuration.$isOn)
+                .toggleStyle(.switch)
+                .labelsHidden()
+        }
     }
 }
 
