@@ -62,50 +62,51 @@ struct Inspector: View {
     private func blur(_ settings: CameraSettings) -> some View {
         @Bindable var settings = settings
 
-        Card("Background blur") {
+        Card("Background blur", about: "Blurs everything behind you, the way a camera with a large lens does. This Mac does the blurring, not the camera.") {
             Toggle("Background blur", isOn: $settings.bokehEnabled)
 
             if settings.bokehEnabled {
                 Slider2("Simulated aperture", value: $settings.blurAmount,
                         range: 0...1,
                         display: String(format: "f/%.1f", settings.aperture))
-                Note("f/1.4 gives the most blur and f/16 almost none. Blur radius scales with 1 / f-number.",
+                Note("A real lens blurs the background more as its opening, the aperture, gets wider. A lower f-number is a wider opening: f/1.4 is the most blur and f/16 is almost none.",
                      tone: .hint)
             }
         }
 
         if settings.bokehEnabled {
-            Card("Blur mode") {
+            Card("Blur mode", about: "Whether everything behind you gets the same blur, or more blur the further away it is.") {
                 Choice("", selection: $settings.uniformBlur, options: [
                     (true, "Uniform"),
                     (false, "Depth-graded"),
                 ])
                 Note(settings.uniformBlur
-                     ? "One blur radius for everything outside the person mask. No depth model runs."
-                     : "Blur radius grows with distance from the focal plane. Needs a depth map, made by the model below on every second frame.",
+                     ? "Everything that is not you gets the same blur. The app only needs to know which pixels are you (the person mask, below)."
+                     : "Things further from you get more blur, like a real lens. For that the Mac has to estimate how far away every pixel is. The estimate is called a depth map. A neural network makes it from the picture, on every second frame.",
                      tone: .hint)
 
                 if !settings.uniformBlur {
-                    Text("Depth model").foregroundStyle(.secondary)
+                    Text("Depth model: the network that estimates distance").foregroundStyle(.secondary)
                     DepthModelRows(installer: camera.depthPro2, settings: settings)
 
                     Toggle("Focal plane follows subject", isOn: $settings.autoFocusSubject)
                     if settings.autoFocusSubject {
-                        Note("The focal plane is the median depth under the person mask.", tone: .hint)
+                        Note("The focal plane is the distance that stays sharp. On: it is kept at your distance (the median depth of the pixels inside the person mask), so you stay sharp when you move.", tone: .hint)
                     } else {
                         Slider2("Focal plane depth", value: $settings.focusDistance,
                                 range: 0...1,
                                 display: String(format: "%.2f", settings.focusDistance))
-                        Note("Normalised depth: 0 is nearest, 1 is furthest.", tone: .hint)
+                        Note("The focal plane is the distance that stays sharp. Here you fix it yourself: 0 is the nearest thing in view and 1 is the furthest.", tone: .hint)
                     }
                 }
             }
 
-            Card("Person mask") {
+            Card("Person mask", about: "To blur the background and not you, the app has to know which pixels are you. Apple's Vision framework works that out for every frame and returns a black and white image, white where a person is. That image is the person mask, and its edge is where the blur starts.") {
                 Choice("Vision segmentation quality", selection: $settings.matteQuality, options: [
                     (.fast, "Fast"), (.balanced, "Balanced"), (.accurate, "Accurate"),
                 ])
-                Note(settings.matteQuality.effect
+                Note("A larger mask follows hair, fingers and glasses more closely, and takes longer to make. "
+                     + settings.matteQuality.effect
                      + (camera.maskMs > 0
                         ? String(format: " Measured now: %.0f ms per mask.", camera.maskMs)
                         : ""),
@@ -113,16 +114,16 @@ struct Inspector: View {
 
                 Toggle("Sync mask to frame", isOn: $settings.syncBokeh)
                 Note(settings.syncBokeh
-                     ? "Each frame is held until its own mask is ready, so mask and frame match exactly. Adds one mask time to latency."
-                     : "Frames are not held. Each uses the newest finished mask, which is 1 to 2 frames old, so the blur edge lags fast movement.",
+                     ? "On: each frame waits for its own mask, so the edge of the blur sits exactly on you. This delays the picture by one mask time, and never by more than 50 ms."
+                     : "Off: frames never wait. Each uses the last mask that finished, which is 1 to 2 frames old, so the edge of the blur trails behind you when you move fast.",
                      tone: .hint)
             }
 
-            Card("Bokeh highlights") {
+            Card("Bokeh highlights", about: "Bokeh is how out-of-focus lights look. Through a real lens, a small bright light blurs into a bright disc in the shape of the lens opening.") {
                 Slider2("Highlight bloom", value: $settings.highlightBloom,
                         range: 0...1,
                         display: String(format: "%.0f%%", settings.highlightBloom * 100))
-                Note("How much brighter pixels count in the blur, which is what makes lights turn into discs.",
+                Note("How strongly bright pixels dominate the blur. Higher gives brighter, clearer discs.",
                      tone: .hint)
                 Choice("Aperture shape", selection: $settings.apertureShape, options: [
                     (.circular, "Circular"), (.hexagonal, "Hexagonal"),
@@ -141,7 +142,7 @@ struct Inspector: View {
     private func light(_ settings: CameraSettings) -> some View {
         @Bindable var settings = settings
 
-        Card("Exposure") {
+        Card("Exposure", about: "Exposure is how bright the camera makes the picture. Two things set it: the shutter (how long each frame collects light) and ISO (how much the sensor's signal is amplified).") {
             Choice("", selection: $settings.autoExposure, options: [
                 (true, "Auto"), (false, "Manual"),
             ])
@@ -154,13 +155,14 @@ struct Inspector: View {
                 ), range: -9...9, step: 1,
                 display: settings.evCompensation > 0
                     ? "+\(settings.evCompensation)" : "\(settings.evCompensation)")
+                Note("Tells auto-exposure to aim brighter (+) or darker (−) than it would on its own.", tone: .hint)
 
                 Toggle("AE lock", isOn: $settings.aeLock)
                     .onChange(of: settings.aeLock) { camera.push() }
-                Note("Freezes shutter and ISO at their current values.", tone: .hint)
+                Note("AE is auto-exposure. Lock freezes the shutter and ISO where they are now, so the brightness stops changing.", tone: .hint)
 
                 Toggle("Meter on subject", isOn: $settings.meterOnSubject)
-                Note("Sets the auto-exposure region to the person mask's bounding box. The mask runs for this even with blur off.",
+                Note("Auto-exposure normally measures the whole picture. On: it measures only the box around you, so a bright window behind you does not leave your face dark. The box comes from the person mask, which then runs even with blur off.",
                      tone: .hint)
             } else {
                 Slider2("Shutter", value: Binding(
@@ -168,21 +170,22 @@ struct Inspector: View {
                     set: { settings.exposureUs = Int($0); camera.push() }
                 ), range: 100...Double(settings.maxExposureUs),
                 display: "\(settings.shutterFraction) s")
+                Note("Longer is brighter, but movement blurs.", tone: .hint)
 
                 Slider2("ISO", value: Binding(
                     get: { Double(settings.iso) },
                     set: { settings.iso = Int($0); camera.push() }
                 ), range: 100...1600, step: 50, display: "\(settings.iso)")
-                Note("Shutter can be at most one frame interval (\(settings.maxExposureUs) µs at \(settings.fps) fps).",
+                Note("Higher ISO is brighter, but grainier. The shutter can be at most one frame long (\(settings.maxExposureUs) µs at \(settings.fps) fps).",
                      tone: .hint)
             }
         }
 
-        Card("Anti-banding") {
+        Card("Anti-banding", about: "Room lights flicker with the mains, too fast to see. A camera can catch that as dark bands rolling through the picture. Anti-banding times the shutter to the flicker. Pick the mains frequency of your country.") {
             Choice("Mains frequency", selection: $settings.antiBanding,
                    options: CameraSettings.AntiBanding.allCases.map { ($0, $0.rawValue) })
                 .onChange(of: settings.antiBanding) { camera.push() }
-            Note("Locks exposure to multiples of the mains cycle so lights do not band. \(settings.antiBanding.hint).",
+            Note("\(settings.antiBanding.hint).",
                  tone: .hint)
         }
     }
@@ -197,7 +200,7 @@ struct Inspector: View {
         @Bindable var settings = settings
         let choice = FocusChoice(settings)
 
-        Card("Focus") {
+        Card("Focus", about: "The C1 has a lens that physically moves to focus. This chooses what moves it. AF means autofocus: the camera moving the lens by itself until the picture is sharp.") {
             Picker("Focus mode", selection: Binding(
                 get: { choice },
                 set: { $0.apply(to: settings); camera.resumeAutofocus() }
@@ -240,7 +243,7 @@ struct Inspector: View {
         }
 
         if choice.cameraDriven {
-            Card("AF range limit") {
+            Card("AF range limit", about: "Lens position is a number from 0 (focused far away) to 255 (focused very close). Autofocus normally searches all of it.") {
                 // Unrestricted AF hunts the whole lens travel, so a gesture or
                 // someone walking past sends it racking to the far wall and
                 // back. A desk sits in a narrow band.
@@ -281,7 +284,7 @@ struct Inspector: View {
     private func colour(_ settings: CameraSettings) -> some View {
         @Bindable var settings = settings
 
-        Card("White balance") {
+        Card("White balance", about: "Light bulbs are orange and daylight is blue. White balance removes that tint so white things look white. AWB is auto white balance.") {
             Choice("", selection: $settings.manualWhiteBalance, options: [
                 (false, "Auto"), (true, "Manual"),
             ])
@@ -292,6 +295,8 @@ struct Inspector: View {
                     get: { Double(settings.whiteBalanceK) },
                     set: { settings.whiteBalanceK = Int($0); camera.push() }
                 ), range: 2000...10000, step: 100, display: "\(settings.whiteBalanceK) K")
+                Note("Set it to the colour of your light, in kelvin: about 2700 K for warm bulbs and 5600 K for daylight. Set too low the picture turns blue, too high it turns orange.",
+                     tone: .hint)
             } else {
                 Picker("AWB mode", selection: $settings.awbMode) {
                     ForEach(CameraSettings.AWBMode.allCases) { Text($0.rawValue).tag($0) }
@@ -300,7 +305,7 @@ struct Inspector: View {
             }
         }
 
-        Card("ISP tone") {
+        Card("ISP tone", about: "The ISP is the image signal processor inside the camera. It turns raw sensor data into the picture. These adjust the picture there, before it reaches the Mac.") {
             Stepper2("Saturation", value: Binding(
                 get: { settings.saturation },
                 set: { settings.saturation = $0; camera.push() }), range: -10...10)
@@ -310,10 +315,10 @@ struct Inspector: View {
             Stepper2("Brightness", value: Binding(
                 get: { settings.brightness },
                 set: { settings.brightness = $0; camera.push() }), range: -10...10)
-            Note("Applied by the camera's ISP. Range -10 to 10, 0 is neutral.", tone: .hint)
+            Note("Each goes from -10 to 10. 0 leaves the picture as it is.", tone: .hint)
         }
 
-        Card("ISP detail") {
+        Card("ISP detail", about: "Sharpening and noise removal, also done by the camera's ISP.") {
             Stepper2("Sharpness", value: Binding(
                 get: { settings.sharpness },
                 set: { settings.sharpness = $0; camera.push() }), range: 0...4)
@@ -323,7 +328,7 @@ struct Inspector: View {
             Stepper2("Chroma denoise", value: Binding(
                 get: { settings.chromaDenoise },
                 set: { settings.chromaDenoise = $0; camera.push() }), range: 0...4)
-            Note("Applied by the camera's ISP. Range 0 to 4, 0 is off.", tone: .hint)
+            Note("Sharpness makes edges crisper. Luma denoise smooths grain in brightness. Chroma denoise smooths coloured speckles. Denoising also softens fine detail. Each goes from 0 (off) to 4.", tone: .hint)
         }
     }
 
@@ -333,7 +338,7 @@ struct Inspector: View {
     private func cameraSetup(_ settings: CameraSettings) -> some View {
         @Bindable var settings = settings
 
-        Card("Output") {
+        Card("Output", about: "The picture size and frame rate the camera sends to the Mac over USB.") {
             Choice("Resolution", selection: $settings.outputMode,
                    options: CameraSettings.OutputMode.allCases.map { ($0, $0.rawValue) })
 
@@ -370,7 +375,7 @@ struct Inspector: View {
             .controlSize(.small)
         }
 
-        Card("Virtual camera") {
+        Card("Virtual camera", about: "A virtual camera makes Open Opal's finished picture, blur included, show up as a camera called “Open Opal Camera” in Zoom, Meet, FaceTime and other apps.") {
             virtualCamera
         }
 
@@ -522,10 +527,13 @@ private enum FocusChoice: String, CaseIterable, Identifiable {
 /// One titled group of controls.
 private struct Card<Content: View>: View {
     let title: String
+    /// What the thing in the title is, for someone who has never met the word.
+    let about: String?
     @ViewBuilder var content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String, about: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.about = about
         self.content = content()
     }
 
@@ -536,6 +544,14 @@ private struct Card<Content: View>: View {
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .padding(.bottom, 1)
+
+            if let about {
+                Text(about)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 2)
+            }
 
             content
         }

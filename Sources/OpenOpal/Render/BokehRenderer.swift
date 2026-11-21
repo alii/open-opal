@@ -233,6 +233,23 @@ final class BokehRenderer: @unchecked Sendable {
             }
         }
 
+        /// Sync mode has several masks in flight, and with a deadline they can
+        /// land late and out of order. Each frame takes a stamp on arrival, and a
+        /// mask older than the one already published is dropped.
+        private var _matteStamp = 0
+        private var _publishedStamp = 0
+        func nextMatteStamp() -> Int {
+            lock.lock(); defer { lock.unlock() }
+            _matteStamp += 1
+            return _matteStamp
+        }
+        func publish(matte: MTLTexture, stamp: Int) {
+            lock.lock(); defer { lock.unlock() }
+            guard stamp > _publishedStamp else { return }
+            _publishedStamp = stamp
+            _matte = matte
+        }
+
         func publish(depth: MTLTexture?, matte: MTLTexture?) {
             lock.lock(); defer { lock.unlock() }
             if let depth { _depth = depth }
@@ -452,20 +469,59 @@ final class BokehRenderer: @unchecked Sendable {
         let box = BufferBox(buffer: pixelBuffer)
 
         if needsDepth { kickOffDepthIfIdle(box) }
-        let m = await matteProvider?.matte(from: box.buffer)
+        guard let matteProvider else { return }
 
-        analysis.publish(depth: nil, matte: m?.texture)
+        let store = analysis
+        let onSubject = self.onSubject
+        let stamp = store.nextMatteStamp()
 
-        if let m {
-            let (values, dw, dh) = analysis.depthValues()
-            let subject: SubjectInfo? = values.isEmpty
-                ? SubjectAnalysis.locate(matte: m)
-                : SubjectAnalysis.analyze(matte: m, depth: values,
-                                          depthWidth: dw, depthHeight: dh)
-            if let subject {
-                analysis.publishSubject(subject)
-                if let s = analysis.subject { onSubject?(s) }
+        // Wait for this frame's mask, but only so long. A mask normally takes
+        // 10 to 30ms. When something else is using the Neural Engine it has been
+        // measured at 70 to 180ms, and holding every frame for that turned a
+        // busy Mac into a video a fifth of a second behind. Past the deadline
+        // the frame goes out with the newest mask there is, and its own mask is
+        // still published when it lands, for the frames after it.
+        await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+            let once = ResumeOnce(ready)
+            Task.detached(priority: .userInitiated) {
+                if let m = await matteProvider.matte(from: box.buffer) {
+                    store.publish(matte: m.texture, stamp: stamp)
+
+                    let (values, dw, dh) = store.depthValues()
+                    let subject: SubjectInfo? = values.isEmpty
+                        ? SubjectAnalysis.locate(matte: m)
+                        : SubjectAnalysis.analyze(matte: m, depth: values,
+                                                  depthWidth: dw, depthHeight: dh)
+                    if let subject {
+                        store.publishSubject(subject)
+                        if let s = store.subject { onSubject?(s) }
+                    }
+                }
+                once.resume()
             }
+            Task.detached(priority: .userInitiated) {
+                try? await Task.sleep(for: Self.maskDeadline)
+                once.resume()
+            }
+        }
+    }
+
+    /// The longest a frame is held for its own mask in sync mode.
+    private static let maskDeadline: Duration = .milliseconds(50)
+
+    /// Resumes a continuation the first time it is asked, and never again.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+
+        func resume() {
+            lock.lock()
+            let c = continuation
+            continuation = nil
+            lock.unlock()
+            c?.resume()
         }
     }
 
