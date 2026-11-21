@@ -32,6 +32,8 @@ targets:
     platform: macOS
     sources:
       - path: Sources/OpenOpal
+      # CameraDemand: how the app asks the extension whether anyone is watching.
+      - path: Sources/Shared
       # Compiled Core ML model, fetched by scripts/fetch-models.sh (gitignored —
       # 50MB, and it's a redistributable upstream artifact).
       - path: Models/DepthAnythingV2SmallF16.mlmodelc

@@ -21,6 +21,46 @@ final class VirtualCameraFeeder: @unchecked Sendable {
     private var formatDesc: CMFormatDescription?
     private var isConnected = false
     var connected: Bool { lock.withLock { isConnected } }
+
+    /// The stream video apps read from, which carries the extension's "is
+    /// anyone watching" property.
+    private var sourceStreamID: CMIOStreamID?
+    private var watched = true
+    private var watchedCheckedAt = 0.0
+
+    /// True when a frame sent now would reach a video app.
+    ///
+    /// Frames used to be sent whether or not anything had the camera open. Each
+    /// one cost a GPU blit and wait, a colour conversion and a trip through
+    /// CoreMediaIO's service and the extension, which together measured more
+    /// CPU than the rest of the app, to be thrown away at the far end. The
+    /// extension already publishes whether a capture client is streaming (for
+    /// the login helper), so ask it, ten times a second.
+    ///
+    /// Anything but a clear "nobody" counts as watched: a missed frame in a
+    /// call is worse than a wasted one.
+    var wantsFrames: Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard isConnected else { return false }
+        guard let sourceStreamID else { return true }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - watchedCheckedAt >= 0.1 {
+            watchedCheckedAt = now
+            watched = demand(on: sourceStreamID) ?? true
+        }
+        return watched
+    }
+
+    private func demand(on stream: CMIOStreamID) -> Bool? {
+        var address = CameraDemand.address
+        var value: Unmanaged<CFString>?
+        var used: UInt32 = 0
+        let size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard CMIOObjectGetPropertyData(stream, &address, 0, nil, size, &used, &value) == noErr,
+              used == size, let value else { return nil }
+        return CameraDemand.isActive(value.takeRetainedValue() as String)
+    }
     private let converter = VirtualCameraFrameConverter()
 
     /// Frames delivered / dropped, for the UI.
@@ -37,7 +77,8 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         guard !isConnected else { return }
 
         guard let device = findDevice(uid: kVirtualDeviceUID) else { return }
-        guard let sink = findSinkStream(device: device) else {
+        guard let sink = findStream(device: device, scope: kCMIODevicePropertyScopeOutput,
+                                    direction: 0) else {
             log.warning("virtual device found but no sink stream")
             return
         }
@@ -56,6 +97,10 @@ final class VirtualCameraFeeder: @unchecked Sendable {
 
         deviceID = device
         sinkStreamID = sink
+        sourceStreamID = findStream(device: device, scope: kCMIODevicePropertyScopeInput,
+                                    direction: 1)
+        watched = true
+        watchedCheckedAt = 0
         queue = q.takeRetainedValue()
         isConnected = true
         log.info("feeding virtual camera (device \(device), sink \(sink))")
@@ -125,10 +170,8 @@ final class VirtualCameraFeeder: @unchecked Sendable {
 
     // MARK: - CMIO plumbing
 
-    private var kVirtualDeviceUID: String {
-        // CMIOExtension devices surface their deviceID UUID as the C-API UID.
-        "7E671FBA-4A0A-4B0A-8F5D-3A1A1B4DE6F2"
-    }
+    // CMIOExtension devices surface their deviceID UUID as the C-API UID.
+    private var kVirtualDeviceUID: String { CameraDemand.deviceUID }
 
     private func findDevice(uid: String) -> CMIOObjectID? {
         var address = CMIOObjectPropertyAddress(
@@ -168,10 +211,13 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         return status == noErr ? uid as String : nil
     }
 
-    private func findSinkStream(device: CMIOObjectID) -> CMIOStreamID? {
+    /// The legacy CMIO direction is 0 for output/playback (our sink) and 1 for
+    /// input/capture (what video apps read). This differs from
+    /// CMIOExtensionStream.Direction.
+    private func findStream(device: CMIOObjectID, scope: Int, direction wanted: UInt32) -> CMIOStreamID? {
         var address = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIODevicePropertyStreams),
-            mScope: CMIOObjectPropertyScope(kCMIODevicePropertyScopeOutput),
+            mScope: CMIOObjectPropertyScope(scope),
             mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
 
         var dataSize: UInt32 = 0
@@ -183,8 +229,6 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         guard CMIOObjectGetPropertyData(device, &address, 0, nil, dataSize, &used, &streams) == noErr
         else { return nil }
 
-        // The legacy CMIO property uses 0 = output/playback (our sink) and
-        // 1 = input/capture. This differs from CMIOExtensionStream.Direction.
         for stream in streams {
             var dirAddress = CMIOObjectPropertyAddress(
                 mSelector: CMIOObjectPropertySelector(kCMIOStreamPropertyDirection),
@@ -195,7 +239,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
             if CMIOObjectGetPropertyData(stream, &dirAddress, 0, nil,
                                          UInt32(MemoryLayout<UInt32>.size),
                                          &dirUsed, &direction) == noErr,
-               direction == 0 {
+               direction == wanted {
                 return stream
             }
         }

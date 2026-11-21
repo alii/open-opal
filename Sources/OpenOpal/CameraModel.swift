@@ -142,7 +142,8 @@ final class CameraModel {
 
                 // Feed the virtual camera the exact frame the preview shows —
                 // processed, un-mirrored. Off-main, like everything else here.
-                if let t = texture.t, self.feeder.connected,
+                // Only while a video app has the camera open: see wantsFrames.
+                if let t = texture.t, self.feeder.wantsFrames,
                    let pb = renderer.exportFrame(t) {
                     self.feeder.send(pb)
                 }
