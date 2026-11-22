@@ -66,7 +66,7 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
     /// frames the model remembers no longer describe the scene.
     private static let staleAfter: TimeInterval = 1
 
-    private let device: MTLDevice
+    private let textures: AnalysisTexturePool
     private let model: MLModel
     private let width: Int
     private let height: Int
@@ -79,8 +79,8 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
     private let lock = NSLock()
     private var state: MLState
     private var lastRun = Date.distantPast
+    private var generation: UInt64 = 0
 
-    private var texture: MTLTexture?
     private var scratch: [Float] = []
 
     // Scratch planes for turning NV12 into the planar RGB the model wants.
@@ -92,7 +92,7 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
     private var fullRange = vImage_YpCbCrToARGB()
 
     init?(device: MTLDevice, modelURL: URL = DepthPro2.installedModelURL) {
-        self.device = device
+        textures = AnalysisTexturePool(device: device, format: .r32Float, capacity: 3)
 
         let config = MLModelConfiguration()
         // The GPU, as for Depth Anything, and for the same reason: the Neural
@@ -172,8 +172,24 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
         planes.forEach { $0.free() }
     }
 
-    func depth(from pixelBuffer: CVPixelBuffer) async -> DepthProvider.Result? {
-        lock.withLock { predict(pixelBuffer) }
+    func depth(from pixelBuffer: CVPixelBuffer, generation token: UInt64) async -> DepthProvider.Result? {
+        lock.withLock {
+            guard token >= generation else { return nil }
+            if token != generation { resetState(generation: token) }
+            return predict(pixelBuffer)
+        }
+    }
+
+    func reset(generation token: UInt64) {
+        lock.withLock {
+            if token > generation { resetState(generation: token) }
+        }
+    }
+
+    /// The frames the model remembers came from before the restart.
+    private func resetState(generation token: UInt64) {
+        generation = token
+        state = model.makeState()
     }
 
     private func predict(_ pixelBuffer: CVPixelBuffer) -> DepthProvider.Result? {
@@ -288,13 +304,8 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
         var lo: Float = 0, hi: Float = 1
         vDSP_vclip(scratch, 1, &lo, &hi, &scratch, 1, vDSP_Length(count))
 
-        if texture == nil || texture!.width != w || texture!.height != h {
-            let d = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .r32Float, width: w, height: h, mipmapped: false)
-            d.usage = [.shaderRead, .shaderWrite]
-            texture = device.makeTexture(descriptor: d)
-        }
-        guard let texture else { return nil }
+        guard let backing = textures.acquire(width: w, height: h) else { return nil }
+        let texture = backing.texture
 
         scratch.withUnsafeBytes { raw in
             texture.replace(region: MTLRegionMake2D(0, 0, w, h),
@@ -302,6 +313,6 @@ final class DepthPro2Provider: DepthSource, @unchecked Sendable {
                             withBytes: raw.baseAddress!,
                             bytesPerRow: w * MemoryLayout<Float>.size)
         }
-        return DepthProvider.Result(texture: texture, values: scratch, width: w, height: h)
+        return DepthProvider.Result(backing: backing, values: scratch, width: w, height: h)
     }
 }

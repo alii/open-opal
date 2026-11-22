@@ -13,14 +13,14 @@ final class CameraSettings {
 
     // MARK: - Cold (require pipeline rebuild)
 
-    var outputMode: OutputMode = .fhd1080 { didSet { if oldValue != outputMode { coldDirty = true; save() } } }
-    var fps: Int = 30                     { didSet { if oldValue != fps { coldDirty = true; save() } } }
+    var outputMode: OutputMode = .fhd1080 { didSet { if oldValue != outputMode { coldSettingChanged() } } }
+    var fps: Int = 30                     { didSet { if oldValue != fps { coldSettingChanged() } } }
 
     /// The C1's sensor is mounted upside down in the housing — Opal's stock
     /// firmware corrects for it, so nobody ever knew. We boot our own pipeline,
     /// so we have to undo it ourselves. Done on the device ISP (free), which is
     /// why it's a cold setting.
-    var rotate180 = true                  { didSet { if oldValue != rotate180 { coldDirty = true; save() } } }
+    var rotate180 = true                  { didSet { if oldValue != rotate180 { coldSettingChanged() } } }
 
     /// Preview only. A webcam preview should read like a mirror, but the image
     /// other people see must NOT be mirrored or your text comes out backwards —
@@ -28,7 +28,32 @@ final class CameraSettings {
     var mirrorPreview = true { didSet { save() } }
 
     /// Set when a cold setting changed and the pipeline needs a reboot to catch up.
-    var coldDirty = false
+    private(set) var coldDirty = false
+    @ObservationIgnored private var coldRevision: UInt64 = 0
+
+    struct ColdConfiguration: Equatable {
+        let outputMode: OutputMode
+        let fps: Int
+        let rotate180: Bool
+        fileprivate let revision: UInt64
+    }
+
+    var coldConfiguration: ColdConfiguration {
+        ColdConfiguration(outputMode: outputMode, fps: fps,
+                          rotate180: rotate180, revision: coldRevision)
+    }
+
+    /// Only a successful boot of the unchanged request clears pending edits.
+    func completeColdConfiguration(_ configuration: ColdConfiguration, opened: Bool) {
+        guard opened, configuration == coldConfiguration else { return }
+        coldDirty = false
+    }
+
+    private func coldSettingChanged() {
+        coldRevision += 1
+        coldDirty = true
+        save()
+    }
 
     /// The IMX582 has no native 1080p mode — its smallest sensor config is 4K.
     /// Every mode below captures 4K and scales on the *device* ISP, because
