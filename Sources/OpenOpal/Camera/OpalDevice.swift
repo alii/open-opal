@@ -126,23 +126,23 @@ final class OpalDevice {
             self.closing = nil
         }
 
-        let deadline = Date().addingTimeInterval(20)
-        var target: Discovered?
+        // After 20 seconds, say the camera is missing, but keep looking. It used
+        // to stop here for good, so a camera plugged back in a little later
+        // stayed dark until the app was restarted.
+        let missingAfter = Date().addingTimeInterval(20)
+        var found: Discovered?
 
-        while Date() < deadline {
+        while found == nil {
             let devices = await Task.detached(priority: .userInitiated) { Self.discover() }.value
             // A device still in BOOTLOADER is mid-reboot: it'll be ready shortly.
             if let ready = devices.first(where: { $0.usable }) {
-                target = ready
+                found = ready
                 break
             }
-            try? await Task.sleep(for: .milliseconds(700))
+            if state != .notFound, Date() >= missingAfter { state = .notFound }
+            try? await Task.sleep(for: state == .notFound ? .seconds(2) : .milliseconds(700))
         }
-
-        guard let target else {
-            state = .notFound
-            return
-        }
+        guard let target = found else { return }
 
         state = .connecting
         log.info("booting pipeline onto \(target.mxid, privacy: .public)")

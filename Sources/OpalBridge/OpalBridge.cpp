@@ -18,8 +18,17 @@ std::string g_lastError;
 
 // Keep discovery on USB even if the parent process selected another protocol.
 // bootstrap.sh also disables TCP/IP inside the SDK for its internal reconnects.
+//
+// Crash dumps are turned off as well. When a camera is unplugged, closing it
+// counts as a crash, and the SDK then searches for the camera again from inside
+// dai::Device's destructor so it can fetch a dump. If the camera is plugged
+// back in during that search, the SDK opens it there, and a failure to open
+// throws out of the destructor and aborts the app. Nothing here reads the dump.
 struct UsbOnlyInit {
-    UsbOnlyInit() { setenv("DEPTHAI_PROTOCOL", "usb", /*overwrite=*/1); }
+    UsbOnlyInit() {
+        setenv("DEPTHAI_PROTOCOL", "usb", /*overwrite=*/1);
+        setenv("DEPTHAI_CRASHDUMP_TIMEOUT", "0", /*overwrite=*/1);
+    }
 };
 const UsbOnlyInit g_usbOnly;
 
