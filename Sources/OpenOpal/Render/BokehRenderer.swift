@@ -15,7 +15,8 @@ private let log = Logger(subsystem: "com.openopal", category: "render")
 ///     NV12 ──► linear RGB ──► [depth + matte] ──► CoC ──► gather ──► composite
 ///
 /// Asynchronous analysis supplies the latest current result without stalling.
-/// Synchronous callers wait for analysis paired with the exact input frame.
+/// Synchronous callers wait, up to a deadline, for the mask of the exact input
+/// frame. Nobody waits for depth.
 ///
 /// A value snapshot of everything the render path needs from CameraSettings.
 ///
@@ -30,7 +31,6 @@ struct RenderSettings: Sendable {
     var uniformBlur: Bool
     var meterOnSubject: Bool
     var autoFocusSubject: Bool
-    var focusOnSubject: Bool
     var focusDistance: Double
     var aperture: Double
     var hexIris: Bool
@@ -43,10 +43,6 @@ struct RenderSettings: Sendable {
         uniformBlur = s.uniformBlur
         meterOnSubject = s.meterOnSubject
         autoFocusSubject = s.autoFocusSubject
-        // Focus tracking consumes the same subject analysis, so it has to be in
-        // the snapshot too — otherwise "Follow face" silently does nothing
-        // whenever bokeh and subject metering are both off.
-        focusOnSubject = s.focusOnSubject
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
@@ -161,13 +157,12 @@ final class BokehRenderer: @unchecked Sendable {
 
     // MARK: - Analysis handoff
 
-    /// Frame-paired results never pass through the asynchronous latest-value box.
+    /// What sync mode worked out for one frame. `matte` is that frame's own
+    /// mask, or nil if it missed the deadline and the newest one should be used.
     struct FrameAnalysis: @unchecked Sendable {
         let pixelBuffer: CVPixelBuffer
         let generation: UInt64
-        let depth: DepthProvider.Result?
         let matte: MatteResult?
-        let subject: SubjectInfo?
     }
 
     /// Latest results retain their leases. Generations fence earlier modes and
@@ -178,6 +173,7 @@ final class BokehRenderer: @unchecked Sendable {
         private var _matte: MatteResult?
         private var _matteBusy = false
         private var _depthBusy = false
+        private var _depthTick = 0
         private var _subject: SubjectInfo?
         private var generation: UInt64 = 0
         private var captureGeneration: UInt64 = 0
@@ -227,18 +223,30 @@ final class BokehRenderer: @unchecked Sendable {
         }
         func endMatte() { lock.withLock { _matteBusy = false } }
 
-        func tryBeginDepth() -> UInt64? {
+        /// Non-nil on every `interval`th call, and only if no depth pass is
+        /// running. The count lives here, under the lock, because in sync mode
+        /// several frames ask at once.
+        func tryBeginDepth(every interval: Int) -> UInt64? {
             lock.withLock {
-                guard !synchronous, !_depthBusy else { return nil }
+                _depthTick &+= 1
+                guard _depthTick % interval == 0, !_depthBusy else { return nil }
                 _depthBusy = true
                 return generation
             }
         }
-        func endDepth() { lock.withLock { _depthBusy = false } }
+        func endDepth(ms: Double) {
+            lock.withLock {
+                _depthBusy = false
+                _depthMs += 0.2 * (ms - _depthMs)
+            }
+        }
+        private var _depthMs = 0.0
+        var depthMs: Double { lock.withLock { _depthMs } }
 
+        /// Depth is never waited for, so it lands here in both modes.
         func publishDepth(_ depth: DepthProvider.Result, generation token: UInt64) {
             lock.withLock {
-                guard token == generation, !synchronous else { return }
+                guard token == generation else { return }
                 _depth = depth
             }
         }
@@ -247,19 +255,28 @@ final class BokehRenderer: @unchecked Sendable {
             lock.withLock { (_depth?.values ?? [], _depth?.width ?? 0, _depth?.height ?? 0) }
         }
 
-        func publishMatte(_ matte: MatteResult, subject: SubjectInfo?,
-                          generation token: UInt64) -> SubjectInfo? {
+        /// Sync mode has several masks in flight, and with a deadline they can
+        /// land late and out of order. Each frame takes a stamp on arrival, and a
+        /// mask older than the one already published is dropped.
+        private var _matteStamp = 0
+        private var _publishedStamp = 0
+        func nextMatteStamp() -> Int {
             lock.withLock {
-                guard token == generation, !synchronous else { return nil }
-                _matte = matte
-                return updateSubject(subject)
+                _matteStamp += 1
+                return _matteStamp
             }
         }
 
-        func publishSynchronousSubject(_ subject: SubjectInfo?,
-                                       generation token: UInt64) -> SubjectInfo? {
+        /// `stamp` is nil outside sync mode, where only one mask runs at a time.
+        func publishMatte(_ matte: MatteResult, subject: SubjectInfo?,
+                          generation token: UInt64, stamp: Int? = nil) -> SubjectInfo? {
             lock.withLock {
-                guard token == generation, synchronous else { return nil }
+                guard token == generation, synchronous == (stamp != nil) else { return nil }
+                if let stamp {
+                    guard stamp > _publishedStamp else { return nil }
+                    _publishedStamp = stamp
+                }
+                _matte = matte
                 return updateSubject(subject)
             }
         }
@@ -289,7 +306,7 @@ final class BokehRenderer: @unchecked Sendable {
         let buffer: CVPixelBuffer
     }
 
-    var depthProvider: DepthProvider?
+    var depthProvider: (any DepthSource)?
     var matteProvider: MatteProvider?
 
     // MARK: - Frame
@@ -324,7 +341,15 @@ final class BokehRenderer: @unchecked Sendable {
 
         guard encode(cmd, nv12Pipeline, textures: [luma.texture, chroma.texture, linearTex],
                      size: (w, h)) else { return nil }
-        if !syncing && (settings.bokehEnabled || settings.meterOnSubject || settings.focusOnSubject) {
+
+        // Segmentation feeds TWO features, not just bokeh: it also tells the
+        // camera where to meter. Gating the whole analysis pass behind
+        // `bokehEnabled` meant "meter on me" silently did nothing whenever bokeh
+        // was off — which is most of the time.
+        //
+        // In sync mode the caller has already run analyzeNow() for this exact
+        // frame, so there's nothing to kick off here.
+        if !syncing && (settings.bokehEnabled || settings.meterOnSubject) {
             kickOffAnalysisIfIdle(pixelBuffer: pixelBuffer,
                                   needsDepth: settings.bokehEnabled && !settings.uniformBlur)
         }
@@ -332,9 +357,10 @@ final class BokehRenderer: @unchecked Sendable {
         var compositeBlur = linearTex
         var compositeCoC = blackTexture()
         var updatedHistory = false
-        let latest = syncing
-            ? (analysisForFrame?.depth, analysisForFrame?.matte, analysisForFrame?.subject)
-            : analysis.latest()
+        // In sync mode the mask is this frame's own, unless it missed the
+        // deadline. Depth and the subject are always the newest there are.
+        var latest = analysis.latest()
+        if let own = analysisForFrame?.matte { latest.1 = own }
         let depth = latest.0?.texture
         let matte = latest.1?.texture
         let u = uniforms(settings, subject: latest.2, w: w, h: h)
@@ -391,7 +417,6 @@ final class BokehRenderer: @unchecked Sendable {
             matteProvider?.reset(generation: generation)
             historyReady = false
             historyGeneration = nil
-            frameIndex = 0
         }
     }
 
@@ -412,14 +437,11 @@ final class BokehRenderer: @unchecked Sendable {
     /// a second to appear. Now ~15Hz, with the background-masked history
     /// (depth_smooth) doing the real work of killing the trail.
     private static let depthInterval = 2
-    private var frameIndex = 0
 
     private func kickOffAnalysisIfIdle(pixelBuffer: CVPixelBuffer, needsDepth: Bool) {
         let box = BufferBox(buffer: pixelBuffer)
         let store = analysis
         let onSubject = self.onSubject
-
-        frameIndex &+= 1
 
         // --- segmentation: every frame. It's what tracks you. ---
         if let matteProvider, let generation = store.tryBeginMatte() {
@@ -440,17 +462,27 @@ final class BokehRenderer: @unchecked Sendable {
         }
 
         // --- depth: occasionally, and only when bokeh actually needs it. ---
-        guard needsDepth, let depthProvider else { return }
-        guard frameIndex % Self.depthInterval == 0,
-              let generation = store.tryBeginDepth() else { return }
+        if needsDepth { kickOffDepthIfIdle(box) }
+    }
+
+    /// Starts a depth pass for this frame unless one is running or it is not
+    /// this frame's turn. Never waited on: the render loop uses the newest map.
+    private func kickOffDepthIfIdle(_ box: BufferBox) {
+        let store = analysis
+        guard let depthProvider,
+              let generation = store.tryBeginDepth(every: Self.depthInterval) else { return }
 
         Task.detached(priority: .userInitiated) {
-            defer { store.endDepth() }
+            let start = CFAbsoluteTimeGetCurrent()
             if let d = await depthProvider.depth(from: box.buffer, generation: generation) {
                 store.publishDepth(d, generation: generation)
             }
+            store.endDepth(ms: (CFAbsoluteTimeGetCurrent() - start) * 1000)
         }
     }
+
+    /// What one depth map costs, in milliseconds. Zero until depth has run.
+    var depthMs: Double { analysis.depthMs }
 
     /// Fired whenever we get a fresh read on the subject. CameraModel uses it to
     /// meter exposure on the person rather than the whole frame.
@@ -461,36 +493,97 @@ final class BokehRenderer: @unchecked Sendable {
         set { callbackLock.withLock { _onSubject = newValue } }
     }
 
-    /// Compute the mask (and optionally depth) for THIS frame, and wait for it.
+    /// Compute the mask for THIS frame, and wait for it.
     ///
     /// Costs latency, buys exact alignment: the mask describes the frame we're
     /// about to composite, not one from 60ms ago. This is the whole point of
     /// "sync" mode — the trailing edge is a synchronisation problem, not a
     /// filtering one.
+    ///
+    /// Depth is not waited for. It used to be, on every frame, and with three
+    /// frames in flight that was three depth passes at once: a profile showed
+    /// them using more than a core of CPU to feed the GPU, for no visible gain.
+    /// The mask is what has to line up with you. The depth map only describes the
+    /// room behind you, and a map that is two frames old still describes it.
+    ///
+    /// Nil means the camera restarted while this frame waited, and the frame
+    /// must be dropped.
     func analyzeNow(pixelBuffer: CVPixelBuffer, needsDepth: Bool,
                     captureGeneration: UInt64) async -> FrameAnalysis? {
         guard let generation = analysis.setSynchronous(true, captureGeneration: captureGeneration)
         else { return nil }
         let box = BufferBox(buffer: pixelBuffer)
-        let onSubject = self.onSubject
-        async let matteTask = matteProvider?.matte(from: box.buffer, generation: generation)
-        async let depthTask = needsDepth ? depthProvider?.depth(from: box.buffer, generation: generation) : nil
-        let (matte, depth) = await (matteTask, depthTask)
-        guard analysis.isCurrent(generation) else { return nil }
+        if needsDepth { kickOffDepthIfIdle(box) }
+        guard let matteProvider else {
+            return FrameAnalysis(pixelBuffer: pixelBuffer, generation: generation, matte: nil)
+        }
 
-        let subject = matte.flatMap { matte in
-            if let depth {
-                return SubjectAnalysis.analyze(matte: matte, depth: depth.values,
-                                               depthWidth: depth.width, depthHeight: depth.height)
+        let store = analysis
+        let onSubject = self.onSubject
+        let stamp = store.nextMatteStamp()
+        let own = MatteSlot()
+
+        // Wait for this frame's mask, but only so long. A mask normally takes
+        // 10 to 30ms. When something else is using the Neural Engine it has been
+        // measured at 70 to 180ms, and holding every frame for that turned a
+        // busy Mac into a video a fifth of a second behind. Past the deadline
+        // the frame goes out with the newest mask there is, and its own mask is
+        // still published when it lands, for the frames after it.
+        await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+            let once = ResumeOnce(ready)
+            Task.detached(priority: .userInitiated) {
+                if let m = await matteProvider.matte(from: box.buffer, generation: generation) {
+                    own.set(m)
+
+                    let (values, dw, dh) = store.depthValues()
+                    let subject: SubjectInfo? = values.isEmpty
+                        ? SubjectAnalysis.locate(matte: m)
+                        : SubjectAnalysis.analyze(matte: m, depth: values,
+                                                  depthWidth: dw, depthHeight: dh)
+                    if let subject = store.publishMatte(m, subject: subject,
+                                                        generation: generation, stamp: stamp),
+                       store.isCurrent(generation) {
+                        onSubject?(subject, generation)
+                    }
+                }
+                once.resume()
             }
-            return SubjectAnalysis.locate(matte: matte)
+            Task.detached(priority: .userInitiated) {
+                try? await Task.sleep(for: Self.maskDeadline)
+                once.resume()
+            }
         }
-        let smoothed = analysis.publishSynchronousSubject(subject, generation: generation)
-        if let smoothed, analysis.isCurrent(generation) {
-            onSubject?(smoothed, generation)
+        guard store.isCurrent(generation) else { return nil }
+        return FrameAnalysis(pixelBuffer: pixelBuffer, generation: generation, matte: own.take())
+    }
+
+    /// The longest a frame is held for its own mask in sync mode.
+    private static let maskDeadline: Duration = .milliseconds(50)
+
+    /// Resumes a continuation the first time it is asked, and never again.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+
+        func resume() {
+            lock.lock()
+            let c = continuation
+            continuation = nil
+            lock.unlock()
+            c?.resume()
         }
-        return FrameAnalysis(pixelBuffer: pixelBuffer, generation: generation,
-                             depth: depth, matte: matte, subject: smoothed)
+    }
+
+    /// Holds one frame's own mask between the task that makes it and the frame
+    /// that waits for it.
+    private final class MatteSlot: @unchecked Sendable {
+        private let lock = NSLock()
+        private var matte: MatteResult?
+
+        func set(_ m: MatteResult) { lock.withLock { matte = m } }
+        func take() -> MatteResult? { lock.withLock { matte } }
     }
 
     // MARK: - Owned frame output

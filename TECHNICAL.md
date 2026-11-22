@@ -137,21 +137,30 @@ Myriad X (IMX582)
                                  SwiftUI preview
 ```
 
-The background blur uses Vision person segmentation. Synchronous bokeh pairs
-analysis with the exact input frame; asynchronous mode reuses the latest current
-analysis without waiting for inference. Frames are blurred in linear light so
-highlights bloom instead of greying out. An
+The background blur uses Vision person segmentation. Synchronous bokeh waits
+for the mask of the exact input frame, for up to 50 ms. A frame whose mask
+misses that deadline goes out with the newest mask instead. Asynchronous mode
+never waits and always uses the newest mask. Up to three frames are analysed
+at once. Frames are blurred in linear light so highlights bloom instead of
+greying out. An
 optional depth-graded mode uses
 [Depth Anything V2](https://huggingface.co/apple/coreml-depth-anything-v2-small)
 for distance-based falloff.
+
+[Depth Pro 2](https://github.com/apple-aiml-research/ml-depth-pro-2) can stand
+in for it, so the two can be compared. It is experimental. Turn on
+"Depth-graded blur" and press "Download model": the app fetches 52 MB from Apple's
+Hugging Face repo into `~/Library/Application Support/OpenOpal/Models/`, and
+"Delete model" removes it. It needs macOS 15. Its weights are under Apple's
+research-only model licence, so the app never ships them.
 
 Linear-light decoding and display encoding use matching sRGB transfer curves.
 With bokeh off, the neutral video-range ramp must round-trip to its absolute
 display levels within one 8-bit step; comparison only against another processed
 frame would miss unwanted darkening.
 
-Depth analysis runs one inference at a time, including switches between
-background and frame-paired analysis. Matte quality changes take effect when
+Depth analysis runs one inference at a time, on every second frame, and no
+frame ever waits for it. Both modes render with the newest depth map. Matte quality changes take effect when
 an idle analysis lane starts its next frame, not during a running Vision request.
 
 Preview and virtual-camera consumers retain the same completed render output.
@@ -162,8 +171,8 @@ instead of recycling live storage.
 Matte and depth results keep their storage until every analysis or GPU reader
 finishes. Capture resets and sync-mode changes reject earlier results and
 subject callbacks; they do not recycle a lane while Vision is still using it.
-Synchronous rendering rejects analysis for any other input buffer rather than
-silently falling back to the latest asynchronous mask.
+Synchronous rendering rejects analysis made for any other input buffer. Masks
+that land late or out of order never replace a newer one.
 
 Temporal smoothing reads the previous matte without changing it. A fresh
 capture, resolution change, analysis-mode change, or interrupted bokeh path
@@ -172,11 +181,6 @@ history. The check compares GPU history pixels and fresh-versus-warm rendering,
 then checks that capture, mode, and resolution resets match a fresh renderer.
 
 ### Autofocus
-
-“Follow face” uses the upper-middle of the segmented person's box as an estimate
-of where a face is, not a face detector. It refocuses when that area's size changes
-by more than 40%, with a one-second cooldown. This works best with one person
-facing the camera; raised arms or multiple people can confuse the estimate.
 
 “Limit range” restricts autofocus to the Far and Near lens positions you choose
 (0–255). The limit is restored after switching from manual to automatic focus,

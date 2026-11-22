@@ -328,30 +328,52 @@ fileprivate final class SinkStreamSource: NSObject, CMIOExtensionStreamSource {
         client = nil
     }
 
-    /// Pull-driven: consume one buffer, forward it, ask for the next. The
-    /// recursion is bounded by the sink's queue depth.
+    /// Pull-driven: consume one buffer, forward it, ask for the next.
+    ///
+    /// When the queue is empty the system answers at once with no buffer. Asking
+    /// again straight away, as this used to, is a busy loop between this process
+    /// and CoreMediaIO's service: about 20% and 45% of a core, all day, for as
+    /// long as the app was open. So an empty answer waits before the next ask.
     private func consumeNext(from client: CMIOExtensionClient) {
-        deviceSource.sinkStream(consumeFrom: client) { [weak self] again in
+        deviceSource.sinkStream(consumeFrom: client) { [weak self] again, wait in
             guard let self, again, self.client != nil else { return }
-            self.consumeNext(from: client)
+            guard wait > 0 else {
+                self.consumeNext(from: client)
+                return
+            }
+            self.retryQueue.asyncAfter(deadline: .now() + wait) { [weak self] in
+                guard let self, self.client != nil else { return }
+                self.consumeNext(from: client)
+            }
         }
     }
+
+    private let retryQueue = DispatchQueue(label: "sh.alistair.open-opal.camera.sink")
 }
 
 extension CameraDeviceSource {
     /// Bridges the sink's consume loop to the forwarding path. Separated so the
     /// stream source doesn't need to reach into the device's stream objects.
+    ///
+    /// `completion` says whether to keep going, and how long to wait first.
     fileprivate func sinkStream(consumeFrom client: CMIOExtensionClient,
-                                completion: @escaping (Bool) -> Void) {
-        guard let stream = sinkStreamValue else { completion(false); return }
+                                completion: @escaping (Bool, TimeInterval) -> Void) {
+        guard let stream = sinkStreamValue else { completion(false, 0); return }
         stream.consumeSampleBuffer(from: client) { [weak self] sbuf, seq, _, hasMore, err in
-            if let sbuf, err == nil {
-                self?.forwardToSource(sbuf)
-                stream.notifyScheduledOutputChanged(CMIOExtensionScheduledOutput(
-                    sequenceNumber: seq,
-                    hostTimeInNanoseconds: UInt64(sbuf.presentationTimeStamp.seconds * 1e9)))
+            guard err == nil else { completion(false, 0); return }
+            guard let sbuf else {
+                // Nothing queued. With a video app watching, look again soon
+                // enough that a frame never waits long. With nobody watching the
+                // app sends nothing, so a slow check is enough to notice when
+                // that changes.
+                completion(true, self?.hasCaptureClients == true ? 0.008 : 0.1)
+                return
             }
-            completion(err == nil)
+            self?.forwardToSource(sbuf)
+            stream.notifyScheduledOutputChanged(CMIOExtensionScheduledOutput(
+                sequenceNumber: seq,
+                hostTimeInNanoseconds: UInt64(sbuf.presentationTimeStamp.seconds * 1e9)))
+            completion(true, 0)
         }
     }
 

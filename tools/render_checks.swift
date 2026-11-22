@@ -206,14 +206,14 @@ struct RenderChecks {
 
         let depthPool = AnalysisTexturePool(device: device, format: .r32Float, capacity: 1)
         autoreleasepool {
-            let depthToken = store.tryBeginDepth()!
+            let depthToken = store.tryBeginDepth(every: 1)!
             let backing = depthPool.acquire(width: 1, height: 1)!
             var value: Float = 0.25
             backing.texture.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0,
                                     withBytes: &value, bytesPerRow: MemoryLayout<Float>.size)
             store.publishDepth(DepthProvider.Result(backing: backing, values: [value], width: 1, height: 1),
                                generation: depthToken)
-            store.endDepth()
+            store.endDepth(ms: 0)
         }
         var depthSnapshot = store.latest()
         _ = store.reset()
@@ -264,7 +264,7 @@ struct RenderChecks {
         let matte = analysisMatte(pool, value: 255)
         let store = BokehRenderer.AnalysisStore()
         let matteToken = store.tryBeginMatte()!
-        let depthToken = store.tryBeginDepth()!
+        let depthToken = store.tryBeginDepth(every: 1)!
         let subject = SubjectInfo(depth: 0.8, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), coverage: 1)
         let capture = store.currentCaptureGeneration
         let syncToken = store.setSynchronous(true, captureGeneration: capture)!
@@ -276,20 +276,31 @@ struct RenderChecks {
         store.publishDepth(depth, generation: depthToken)
         require(store.latest().0 == nil && store.latest().1 == nil && store.latest().2 == nil,
                 "Mode transition repopulated stale analysis")
-        require(store.publishSynchronousSubject(subject, generation: syncToken)?.depth == 0.8,
-                "Current synchronous subject was lost")
+        let earlier = store.nextMatteStamp()
+        let later = store.nextMatteStamp()
+        require(store.publishMatte(matte, subject: subject, generation: syncToken) == nil,
+                "Synchronous mode admitted an unstamped matte")
+        require(store.publishMatte(matte, subject: subject, generation: syncToken,
+                                   stamp: later)?.depth == 0.8,
+                "Current synchronous matte and subject were lost")
+        require(store.publishMatte(matte, subject: subject, generation: syncToken,
+                                   stamp: earlier) == nil,
+                "A late matte replaced a newer one")
+        store.publishDepth(depth, generation: syncToken)
+        require(store.latest().0 != nil, "Synchronous mode lost the newest depth map")
         _ = store.reset()
         require(!store.isCurrent(syncToken), "Queued callback survived capture reset")
-        require(store.publishSynchronousSubject(subject, generation: syncToken) == nil,
+        require(store.publishMatte(matte, subject: subject, generation: syncToken,
+                                   stamp: store.nextMatteStamp()) == nil,
                 "Old subject repopulated a new capture session")
         require(store.setSynchronous(false, captureGeneration: capture) == nil,
                 "Old capture work changed the new session's mode")
         _ = store.setSynchronous(false, captureGeneration: store.currentCaptureGeneration)
-        require(store.tryBeginMatte() == nil && store.tryBeginDepth() == nil,
+        require(store.tryBeginMatte() == nil && store.tryBeginDepth(every: 1) == nil,
                 "Reset reopened lanes while their old work was running")
         store.endMatte()
-        store.endDepth()
-        require(store.tryBeginMatte() != nil && store.tryBeginDepth() != nil,
+        store.endDepth(ms: 0)
+        require(store.tryBeginMatte() != nil && store.tryBeginDepth(every: 1) != nil,
                 "Analysis lanes did not recover after old work finished")
 
         let renderer = BokehRenderer()!
@@ -389,7 +400,7 @@ struct RenderChecks {
         let prepared = await renderer.analyzeNow(pixelBuffer: frame.buffer, needsDepth: false,
                                                  captureGeneration: capture)!
         let paired = BokehRenderer.FrameAnalysis(pixelBuffer: input, generation: prepared.generation,
-                                                 depth: nil, matte: matte, subject: nil)
+                                                 matte: matte)
         return autoreleasepool {
             let frame = renderer.render(pixelBuffer: input, settings: RenderSettings(settings),
                                         captureGeneration: capture, analysisForFrame: paired)!
@@ -456,7 +467,6 @@ struct RenderChecks {
         let settings = CameraSettings(preferences: preferences)
         settings.bokehEnabled = false
         settings.meterOnSubject = false
-        settings.focusOnSubject = false
         checkNeutralRamp(settings: settings)
         checkOwnedOutput(settings: settings)
         checkAnalysisStorage()

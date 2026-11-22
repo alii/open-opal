@@ -3,8 +3,6 @@ import SwiftUI
 struct MenuBarFlyout: View {
     @Environment(CameraModel.self) private var camera
     let controller: MenuBarPanelController
-    @State private var focusPulse: CGPoint?
-
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
@@ -58,36 +56,11 @@ struct MenuBarFlyout: View {
                 .buttonStyle(.borderless)
                 .padding(12)
 
-                Color.black
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .overlay {
-                        GeometryReader { preview in
-                            MetalPreview(
-                                frame: camera.latestFrame,
-                                mirrored: camera.settings.mirrorPreview,
-                                paused: camera.previewPaused
-                            ) { viewPoint, sensorPoint in
-                                // Focus in sensor space; draw the reticle where the user clicked.
-                                camera.focus(at: sensorPoint)
-                                let p = CGPoint(x: viewPoint.x * preview.size.width,
-                                                y: viewPoint.y * preview.size.height)
-                                withAnimation(.smooth) { focusPulse = p }
-                                Task {
-                                    try? await Task.sleep(for: .milliseconds(900))
-                                    withAnimation(.easeOut) { focusPulse = nil }
-                                }
-                            }
-                            if let focusPulse {
-                                FocusReticle()
-                                    .position(x: focusPulse.x, y: focusPulse.y)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                    }
+                LivePreview()
                     .frame(height: min(geometry.size.width * 9 / 16, geometry.size.height * 0.4))
                     .clipped()
 
-                status
+                StatusLine()
                     .font(.caption)
                     .padding(8)
                 Divider()
@@ -101,7 +74,6 @@ struct MenuBarFlyout: View {
                         Button(camera.previewFrozen ? "Unfreeze Preview" : "Freeze Preview") {
                             camera.previewFrozen.toggle()
                         }
-                        Button("Toggle Advanced Settings") { camera.settings.showAdvanced.toggle() }
                         Button("Reset All Settings") {
                             camera.settings.reset()
                             camera.push()
@@ -145,8 +117,6 @@ struct MenuBarFlyout: View {
             Button("Trigger Autofocus") { camera.device.triggerAutofocus() }
                 .keyboardShortcut("f")
                 .disabled(!camera.device.state.isLive)
-            Button("Toggle Advanced Settings") { camera.settings.showAdvanced.toggle() }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
             Button("Freeze Preview") { camera.previewFrozen.toggle() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Button("Quit Open Opal") { NSApp.terminate(nil) }
@@ -156,9 +126,51 @@ struct MenuBarFlyout: View {
         .opacity(0)
         .accessibilityHidden(true)
     }
+}
 
-    @ViewBuilder
-    private var status: some View {
+/// The picture, in a view of its own. It reads the newest frame, which changes
+/// 30 times a second, and SwiftUI re-runs whichever view reads it. When that was
+/// the whole panel, redrawing the panel cost a quarter of a core.
+private struct LivePreview: View {
+    @Environment(CameraModel.self) private var camera
+    @State private var focusPulse: CGPoint?
+
+    var body: some View {
+        Color.black
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .overlay {
+                GeometryReader { preview in
+                    MetalPreview(
+                        frame: camera.latestFrame,
+                        mirrored: camera.settings.mirrorPreview,
+                        paused: camera.previewPaused
+                    ) { viewPoint, sensorPoint in
+                        // Focus in sensor space; draw the reticle where the user clicked.
+                        camera.focus(at: sensorPoint)
+                        let p = CGPoint(x: viewPoint.x * preview.size.width,
+                                        y: viewPoint.y * preview.size.height)
+                        withAnimation(.smooth) { focusPulse = p }
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(900))
+                            withAnimation(.easeOut) { focusPulse = nil }
+                        }
+                    }
+                    if let focusPulse {
+                        FocusReticle()
+                            .position(x: focusPulse.x, y: focusPulse.y)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+    }
+}
+
+/// Connection state and live numbers, also on their own so that a new reading
+/// redraws one line of text.
+private struct StatusLine: View {
+    @Environment(CameraModel.self) private var camera
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             statusLine
             if showsBootLog, !camera.device.bootLog.isEmpty {

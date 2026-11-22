@@ -119,9 +119,6 @@ final class CameraSettings {
     var lensPosition: Int = 120 { didSet { save() } } // 0..255
     var afMode: AFMode = .continuousVideo { didSet { save() } }
 
-    /// Refocus on the detected face rather than letting AF re-decide for itself.
-    var focusOnSubject = false { didSet { save() } }
-
     /// Clamp where autofocus may hunt, in lens-position units. A desk occupies
     /// a narrow band of the lens's travel, so unrestricted AF racks past you to
     /// the far wall and back. Off by default: the right band depends on how far
@@ -193,10 +190,6 @@ final class CameraSettings {
 
     // MARK: - Bokeh (host-side; see BokehRenderer)
 
-    /// Most people want one switch and one slider. Everything else is here for
-    /// the person who actually wants to argue with the ISP.
-    var showAdvanced = false { didSet { save() } }
-
     var bokehEnabled = false { didSet { save() } }
 
     /// The one bokeh control a normal person should ever touch: 0 = off, 1 = as
@@ -234,6 +227,17 @@ final class CameraSettings {
     /// mask instead, which is where the visible quality actually lives. This is
     /// essentially what Google Meet does, and it's why Meet looks clean.
     var uniformBlur = true { didSet { save() } }
+
+    /// Which network estimates depth for depth-graded blur. Depth Pro 2 is here
+    /// to be compared against Depth Anything, and is only used once its model
+    /// has been downloaded (see DepthPro2Installer).
+    var depthModel: DepthModel = .depthAnythingV2 { didSet { save() } }
+
+    enum DepthModel: String, Codable, CaseIterable, Identifiable {
+        case depthAnythingV2 = "Depth Anything V2"
+        case depthPro2       = "Depth Pro 2"
+        var id: String { rawValue }
+    }
 
     /// How much compute to spend on the mask. With depth gone, we can afford the
     /// good one — and the mask is now the only thing standing between us and a
@@ -299,7 +303,6 @@ final class CameraSettings {
         // hold a focus. Restoring it would start every session with autofocus
         // frozen, so a fresh launch goes back to the default mode instead.
         if let value = saved.afMode, value != .auto { afMode = value }
-        if let value = saved.focusOnSubject { focusOnSubject = value }
         if let value = saved.limitAfRange { limitAfRange = value }
         if let value = saved.afRangeInfinity, (0...255).contains(value) { afRangeInfinity = value }
         if let value = saved.afRangeMacro, (0...255).contains(value) { afRangeMacro = value }
@@ -314,10 +317,10 @@ final class CameraSettings {
         if let value = saved.brightness, (-10...10).contains(value) { brightness = value }
         if let value = saved.contrast, (-10...10).contains(value) { contrast = value }
         if let value = saved.saturation, (-10...10).contains(value) { saturation = value }
-        if let value = saved.showAdvanced { showAdvanced = value }
         if let value = saved.bokehEnabled { bokehEnabled = value }
         if let value = saved.syncBokeh { syncBokeh = value }
         if let value = saved.uniformBlur { uniformBlur = value }
+        if let value = saved.depthModel { depthModel = value }
         if let value = saved.matteQuality { matteQuality = value }
         if let value = saved.aperture, (1.4...16).contains(value) { aperture = value }
         if let value = saved.focusDistance, (0...1).contains(value) { focusDistance = value }
@@ -342,7 +345,6 @@ final class CameraSettings {
             manualFocus: manualFocus,
             lensPosition: lensPosition,
             afMode: afMode,
-            focusOnSubject: focusOnSubject,
             limitAfRange: limitAfRange,
             afRangeInfinity: afRangeInfinity,
             afRangeMacro: afRangeMacro,
@@ -357,10 +359,10 @@ final class CameraSettings {
             brightness: brightness,
             contrast: contrast,
             saturation: saturation,
-            showAdvanced: showAdvanced,
             bokehEnabled: bokehEnabled,
             syncBokeh: syncBokeh,
             uniformBlur: uniformBlur,
+            depthModel: depthModel,
             matteQuality: matteQuality,
             aperture: aperture,
             focusDistance: focusDistance,
@@ -389,7 +391,6 @@ final class CameraSettings {
         var manualFocus: Bool?
         var lensPosition: Int?
         var afMode: AFMode?
-        var focusOnSubject: Bool?
         var limitAfRange: Bool?
         var afRangeInfinity: Int?
         var afRangeMacro: Int?
@@ -404,10 +405,10 @@ final class CameraSettings {
         var brightness: Int?
         var contrast: Int?
         var saturation: Int?
-        var showAdvanced: Bool?
         var bokehEnabled: Bool?
         var syncBokeh: Bool?
         var uniformBlur: Bool?
+        var depthModel: DepthModel?
         var matteQuality: MatteQuality?
         var aperture: Double?
         var focusDistance: Double?
@@ -430,7 +431,6 @@ final class CameraSettings {
         meterOnSubject = false
         exposureUs = 8_000; iso = 400
         manualFocus = false; afMode = .continuousVideo; lensPosition = 120
-        focusOnSubject = false
         limitAfRange = false; afRangeInfinity = 90; afRangeMacro = 160
         manualWhiteBalance = false; awbMode = .auto; whiteBalanceK = 5600; awbLock = false
         antiBanding = .hz60

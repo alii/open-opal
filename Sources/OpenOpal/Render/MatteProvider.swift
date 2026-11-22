@@ -40,6 +40,9 @@ final class MatteProvider: @unchecked Sendable {
         var sequence = VNSequenceRequestHandler()
         var inUse = false
         var needsReset = false
+        /// The level this lane's request is set to. Changed only by whoever has
+        /// claimed the lane, never while its request might be running.
+        var quality: CameraSettings.MatteQuality = .balanced
 
         init() {
             request.qualityLevel = .balanced
@@ -60,13 +63,18 @@ final class MatteProvider: @unchecked Sendable {
     init(device: MTLDevice, laneCount: Int = 3) {
         let count = max(laneCount, 1)
         self.lanes = (0..<count).map { _ in Lane() }
-        textures = AnalysisTexturePool(device: device, format: .r8Unorm, capacity: count + 2)
+        // Each frame in flight can hold its own mask and the newest one, and the
+        // store holds one more.
+        textures = AnalysisTexturePool(device: device, format: .r8Unorm, capacity: count * 2 + 2)
     }
 
     func setQuality(_ q: CameraSettings.MatteQuality) {
         lock.lock(); defer { lock.unlock() }
         guard q != quality else { return }
         quality = q
+        // A new level makes Vision load a different model, so it is a first use
+        // again. Each lane picks the level up when it is next claimed.
+        warmedUp = false
     }
 
     func reset(generation token: UInt64) {
@@ -77,13 +85,16 @@ final class MatteProvider: @unchecked Sendable {
         }
     }
 
-    private func qualityLevel() -> VNGeneratePersonSegmentationRequest.QualityLevel {
-        switch quality {
-        case .fast:     .fast
-        case .balanced: .balanced
-        case .accurate: .accurate
-        }
-    }
+    /// False until one mask has finished at the current quality level.
+    ///
+    /// Vision is not safe to enter from two threads the first time. At launch
+    /// three frames can be released at the same instant, three lanes then start
+    /// their first request together, and the app crashed in
+    /// `+[VNGenerateSemanticSegmentationCompoundRequest
+    /// detectorTypeForSemanticSegmentationRequest]` releasing an object another
+    /// thread had just released. So the first mask runs alone, and the lanes
+    /// only run side by side after it.
+    private var warmedUp = false
 
     /// Nil if every lane is busy — the caller should drop this frame rather than
     /// queue it. Queueing just builds a backlog and turns latency into lag.
@@ -94,10 +105,17 @@ final class MatteProvider: @unchecked Sendable {
             generation = token
             for lane in lanes { lane.needsReset = true }
         }
+        if !warmedUp, lanes.contains(where: \.inUse) { return nil }
         guard let lane = lanes.first(where: { !$0.inUse }) else { return nil }
         lane.inUse = true
-        // Vision may still be using the other lanes' requests.
-        lane.request.qualityLevel = qualityLevel()
+        if lane.quality != quality {
+            lane.quality = quality
+            lane.request.qualityLevel = switch quality {
+            case .fast:     .fast
+            case .balanced: .balanced
+            case .accurate: .accurate
+            }
+        }
         if lane.needsReset {
             lane.sequence = VNSequenceRequestHandler()
             lane.needsReset = false
@@ -105,13 +123,18 @@ final class MatteProvider: @unchecked Sendable {
         return lane
     }
 
-    private func release(_ lane: Lane) {
-        lock.lock(); lane.inUse = false; lock.unlock()
+    /// `finished` is the quality level of a mask that completed, or nil if the
+    /// request failed.
+    private func release(_ lane: Lane, finished: CameraSettings.MatteQuality?) {
+        lock.lock(); defer { lock.unlock() }
+        lane.inUse = false
+        if finished == quality { warmedUp = true }
     }
 
     func matte(from pixelBuffer: CVPixelBuffer, generation token: UInt64) async -> MatteResult? {
         guard let lane = claimLane(generation: token) else { return nil }
-        defer { release(lane) }
+        var finished: CameraSettings.MatteQuality?
+        defer { release(lane, finished: finished) }
 
         let start = CFAbsoluteTimeGetCurrent()
         do {
@@ -120,6 +143,7 @@ final class MatteProvider: @unchecked Sendable {
             log.error("segmentation failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+        finished = lane.quality
         guard let result = lane.request.results?.first as? VNPixelBufferObservation else { return nil }
         let out = upload(result.pixelBuffer)
 
@@ -212,9 +236,13 @@ enum SubjectAnalysis {
         var minX = 1.0, minY = 1.0, maxX = 0.0, maxY = 0.0
         var hits = 0
 
-        for y in 0..<dh {
+        // Every 4th pixel each way. A median over a sixteenth of the subject is
+        // the same median, and sorting every pixel on every pass was costing a
+        // sixth of a core.
+        let step = 4
+        for y in stride(from: 0, to: dh, by: step) {
             let my = y * matte.height / dh
-            for x in 0..<dw {
+            for x in stride(from: 0, to: dw, by: step) {
                 let mx = x * matte.width / dw
                 guard matte.mask[my * matte.width + mx] > 128 else { continue }
 
@@ -227,7 +255,7 @@ enum SubjectAnalysis {
             }
         }
 
-        let coverage = Float(hits) / Float(dw * dh)
+        let coverage = Float(hits) / Float(max((dw / step) * (dh / step), 1))
         // Nobody there (or a few stray pixels) — don't refocus or re-meter on noise.
         guard coverage > 0.02, !subjectDepths.isEmpty else { return nil }
 

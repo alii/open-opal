@@ -39,6 +39,11 @@ final class ExtensionInstaller: NSObject {
 
     private(set) var status: Status = .unknown
 
+    /// Called when macOS finishes installing or replacing the extension. A
+    /// replaced extension is a new device, so whoever was feeding the old one
+    /// has to find it again.
+    var onActivated: (() -> Void)?
+
     /// What the app can actually see, from inside its own process. macOS reports
     /// several very different failures as the same misleading "Extension not
     /// found in App bundle" — including "your app isn't in /Applications" — so
@@ -101,6 +106,33 @@ final class ExtensionInstaller: NSObject {
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
+    /// Replace the installed extension if it is not the one in this app.
+    ///
+    /// macOS copies the extension out of the app once, at install, and never
+    /// looks again. So a newer app kept talking to whatever extension was
+    /// installed first: one Mac ran a four-month-old extension that could not
+    /// say whether anything was watching the camera, and the app sent it every
+    /// frame for nothing. Call this at launch. It does nothing when no extension
+    /// is installed, because installing one is the user's choice.
+    func updateIfOutdated() {
+        guard let extensionID = Self.extensionID, isIncludedInApp, status != .installing else { return }
+        let request = OSSystemExtensionRequest.propertiesRequest(
+            forExtensionWithIdentifier: extensionID, queue: .main)
+        request.delegate = self
+        OSSystemExtensionManager.shared.submitRequest(request)
+    }
+
+    /// Version and build of the extension inside this app.
+    private var bundledVersion: (short: String, build: String)? {
+        guard let extensionID = Self.extensionID,
+              let info = Bundle(url: Bundle.main.bundleURL
+                .appendingPathComponent("Contents/Library/SystemExtensions")
+                .appendingPathComponent("\(extensionID).systemextension"))?.infoDictionary,
+              let short = info["CFBundleShortVersionString"] as? String,
+              let build = info["CFBundleVersion"] as? String else { return nil }
+        return (short, build)
+    }
+
     func uninstall() {
         guard let extensionID = Self.extensionID else {
             status = .failed("The app bundle identifier is missing.")
@@ -123,6 +155,23 @@ extension ExtensionInstaller: OSSystemExtensionRequestDelegate {
         .replace
     }
 
+    /// The answer to `updateIfOutdated`: what macOS has installed.
+    nonisolated func request(_ request: OSSystemExtensionRequest,
+                             foundProperties properties: [OSSystemExtensionProperties]) {
+        let installed = properties
+            .filter { $0.isEnabled && !$0.isUninstalling }
+            .map { (short: $0.bundleShortVersion, build: $0.bundleVersion) }
+        Task { @MainActor in
+            guard let installed = installed.first, let bundled = self.bundledVersion else { return }
+            guard installed != bundled else {
+                log.info("system extension is current (\(bundled.short, privacy: .public)/\(bundled.build, privacy: .public))")
+                return
+            }
+            log.notice("replacing system extension \(installed.short, privacy: .public)/\(installed.build, privacy: .public) with \(bundled.short, privacy: .public)/\(bundled.build, privacy: .public)")
+            self.install()
+        }
+    }
+
     nonisolated func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         Task { @MainActor in
             log.info("system extension awaiting approval in System Settings")
@@ -135,6 +184,7 @@ extension ExtensionInstaller: OSSystemExtensionRequestDelegate {
         Task { @MainActor in
             log.info("system extension activated (result \(result.rawValue))")
             self.status = .installed
+            self.onActivated?()
         }
     }
 

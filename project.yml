@@ -32,6 +32,8 @@ targets:
     platform: macOS
     sources:
       - path: Sources/OpenOpal
+      # CameraDemand: how the app asks the extension whether anyone is watching.
+      - path: Sources/Shared
       # Compiled Core ML model, fetched by scripts/fetch-models.sh (gitignored —
       # 50MB, and it's a redistributable upstream artifact).
       - path: Models/DepthAnythingV2SmallF16.mlmodelc
@@ -47,7 +49,7 @@ targets:
         CFBundleDisplayName: Open Opal
         CFBundleIconFile: AppIcon
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "3"
         LSMinimumSystemVersion: "14.0"
         LSUIElement: true
         NSHumanReadableCopyright: "Open source. Not affiliated with Opal Camera Inc."
@@ -153,7 +155,10 @@ targets:
       properties:
         CFBundleDisplayName: Open Opal Camera
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        # Raise this whenever the extension's code changes. macOS only replaces
+        # an installed extension when its version or build differs, and the app
+        # checks for that at launch. Releases stamp their own build number.
+        CFBundleVersion: "3"
         # SYSX marks this bundle as a system extension. Without it, macOS scans
         # Contents/Library/SystemExtensions, fails to recognise the bundle, and
         # reports "Extension not found in App bundle" even though it's right there.
@@ -197,7 +202,7 @@ targets:
         CFBundleName: OpenOpal Launcher
         CFBundleDisplayName: OpenOpal Launcher
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "3"
         LSMinimumSystemVersion: "14.0"
         LSUIElement: true
         NSSupportsAutomaticTermination: false

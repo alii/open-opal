@@ -7,6 +7,14 @@ import Vision
 
 private let log = Logger(subsystem: "com.openopal", category: "depth")
 
+/// Anything that can turn a camera frame into a depth map for the renderer.
+protocol DepthSource: AnyObject, Sendable {
+    /// Nil if `generation` is older than one this source has already seen.
+    func depth(from pixelBuffer: CVPixelBuffer, generation: UInt64) async -> DepthProvider.Result?
+    /// Forget everything remembered from frames before `generation`.
+    func reset(generation: UInt64)
+}
+
 /// Monocular depth via Apple's Core ML build of Depth Anything V2 (Small, F16),
 /// running on the Neural Engine.
 ///
@@ -27,7 +35,7 @@ private let log = Logger(subsystem: "com.openopal", category: "depth")
 ///     value changes even though the wall didn't move. That's "depth swim", and
 ///     it cannot be fixed here: rescaling a range that's already [0,1] is a
 ///     no-op. It's dealt with downstream, by temporal smoothing in the shader.
-final class DepthProvider: @unchecked Sendable {
+final class DepthProvider: DepthSource, @unchecked Sendable {
 
     private let inferenceLock = NSLock()
     private let textures: AnalysisTexturePool
@@ -46,12 +54,20 @@ final class DepthProvider: @unchecked Sendable {
         }
 
         let config = MLModelConfiguration()
-        // Measured on an M4 Max: GPU 14ms, ANE 24ms, .all 17ms. The GPU is the
-        // fastest single accelerator, but it's also the one running our Metal
-        // passes, and we'd rather not have depth inference contend with the
-        // render loop for it. .all lets Core ML spread the graph across both and
-        // still clears the 33ms frame budget comfortably.
-        config.computeUnits = .all
+        // The GPU, not the Neural Engine. Vision runs the person mask on the
+        // Neural Engine, and the mask is the thing every frame waits for.
+        // Measured on an M4 Max at 30fps with the accurate mask and this model
+        // running on every second frame:
+        //
+        //     mask alone                31ms
+        //     this model on the ANE     60ms
+        //     this model on the GPU     30ms
+        //
+        // So sharing the ANE doubles the latency. The GPU has its own cost:
+        // encoding the graph takes 46ms of CPU time per map. That is why depth
+        // runs on every second frame, one map at a time, and is never waited for
+        // (see BokehRenderer.kickOffDepthIfIdle). .all behaves like the GPU here.
+        config.computeUnits = .cpuAndGPU
 
         do {
             let mlModel = try MLModel(contentsOf: url, configuration: config)
