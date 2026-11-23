@@ -3,7 +3,7 @@
 A native macOS app for the Opal C1 webcam. Opal discontinued the C1 and its
 Composer software; Open Opal keeps the camera working, and adds a few things.
 
-<img width="440" alt="Open Opal in the menu bar" src="docs/screenshot.png">
+<img width="900" alt="Open Opal's floating window: a large preview with the camera's readouts on it, and the settings beside it" src="docs/screenshot.png">
 
 - Full camera control: exposure, focus, white balance, image tuning, 4K/1080p/720p
 - Background blur
