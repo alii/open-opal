@@ -44,6 +44,11 @@ final class ExtensionInstaller: NSObject {
     /// has to find it again.
     var onActivated: (() -> Void)?
 
+    /// Called just before an installed extension is replaced. The app lets go
+    /// of the old one here, so macOS is not asked to stop an extension that
+    /// this app is still feeding.
+    var onWillReplace: (() -> Void)?
+
     /// What the app can actually see, from inside its own process. macOS reports
     /// several very different failures as the same misleading "Extension not
     /// found in App bundle" — including "your app isn't in /Applications" — so
@@ -168,6 +173,9 @@ extension ExtensionInstaller: OSSystemExtensionRequestDelegate {
                 return
             }
             log.notice("replacing system extension \(installed.short, privacy: .public)/\(installed.build, privacy: .public) with \(bundled.short, privacy: .public)/\(bundled.build, privacy: .public)")
+            self.status = .installing
+            self.onWillReplace?()
+            try? await Task.sleep(for: .seconds(1))
             self.install()
         }
     }
