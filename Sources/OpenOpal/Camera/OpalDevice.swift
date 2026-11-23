@@ -323,9 +323,7 @@ final class OpalDevice {
 
     /// `holdingFocus` keeps the lens where a click put it, whatever mode is
     /// chosen, by asking for one-shot autofocus.
-    /// `whiteBalanceK` replaces auto white balance with that setting, without
-    /// touching what the user saved. See `LowLightAssist`.
-    func apply(_ s: CameraSettings, holdingFocus: Bool = false, whiteBalanceK: Int? = nil) {
+    func apply(_ s: CameraSettings, holdingFocus: Bool = false) {
         guard let handle else { return }
         var c = OpalControls()
 
@@ -348,8 +346,8 @@ final class OpalDevice {
         }
         if holdingFocus { c.afMode = OPAL_AF_AUTO }
 
-        c.manualWhiteBalance = s.manualWhiteBalance || whiteBalanceK != nil
-        c.whiteBalanceK      = Int32(s.manualWhiteBalance ? s.whiteBalanceK : whiteBalanceK ?? s.whiteBalanceK)
+        c.manualWhiteBalance = s.manualWhiteBalance
+        c.whiteBalanceK      = Int32(s.whiteBalanceK)
         c.awbLock            = s.awbLock
         c.awbMode = switch s.awbMode {
         case .auto:            OPAL_AWB_AUTO

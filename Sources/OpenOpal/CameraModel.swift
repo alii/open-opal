@@ -174,6 +174,7 @@ final class CameraModel {
                     self.nextSequence += 1
                     var snapshot = RenderSettings(self.settings)
                     snapshot.exposureGain = Float(self.assist.gain)
+                    snapshot.tint = SIMD3<Float>(self.assist.tint)
                     return (renderer, snapshot, seq)
                 }) else { return }
                 let (renderer, snapshot, seq) = work
@@ -235,7 +236,7 @@ final class CameraModel {
     /// Send hot settings to the camera. Cheap — safe to call on every slider tick.
     /// The bridge coalesces and diffs, so nothing here blocks on USB.
     func push() {
-        device.apply(settings, holdingFocus: focusHeld, whiteBalanceK: assist.whiteBalanceK)
+        device.apply(settings, holdingFocus: focusHeld)
     }
 
     /// Steps in when the camera's auto exposure or white balance is stuck.
@@ -244,10 +245,8 @@ final class CameraModel {
     private var assistLoggedAt = Date.distantPast
 
     private func help(with stats: SceneStats) {
-        let before = assist
         guard settings.lowLightHelp else {
             assist = LowLightAssist()
-            if before.whiteBalanceK != nil { push() }
             return
         }
         assist.update(stats,
@@ -259,15 +258,9 @@ final class CameraModel {
         let now = Date()
         if now.timeIntervalSince(assistLoggedAt) >= 5 {
             assistLoggedAt = now
-            assistLog.info("picture brightness \(stats.luma, format: .fixed(precision: 2)), red over blue \(stats.redOverBlue ?? 0, format: .fixed(precision: 2)), low light help adds \(self.assist.gain, format: .fixed(precision: 1))x brightness, white balance \(self.assist.whiteBalanceK.map { "\($0) K" } ?? "left to the camera", privacy: .public)")
+            let tint = assist.tint
+            assistLog.info("picture brightness \(stats.luma, format: .fixed(precision: 2)), red over blue \(stats.redOverBlue ?? 0, format: .fixed(precision: 2)). low light help: brightness x\(self.assist.gain, format: .fixed(precision: 1)), red x\(tint.x, format: .fixed(precision: 2)), green x\(tint.y, format: .fixed(precision: 2)), blue x\(tint.z, format: .fixed(precision: 2))")
         }
-        guard assist.whiteBalanceK != before.whiteBalanceK else { return }
-        if let kelvin = assist.whiteBalanceK, before.whiteBalanceK == nil {
-            assistLog.info("low light help took over white balance at \(kelvin) K")
-        } else if assist.whiteBalanceK == nil {
-            assistLog.info("low light help handed white balance back to the camera")
-        }
-        push()
     }
 
     /// True after a click on the picture: the lens focused there and is holding.

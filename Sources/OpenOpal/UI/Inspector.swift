@@ -166,7 +166,7 @@ struct Inspector: View {
                      tone: .hint)
 
                 Toggle("Low light help", isOn: $settings.lowLightHelp)
-                Note("The camera stops at ISO 1600, and its auto white balance stops near 2600 K. On: when either limit is reached the app brightens the picture itself, and sets a warmer white balance so lamp light stops looking orange. It adds some grain. Manual exposure or manual white balance turns that half off.",
+                Note("The camera stops at ISO 1600, and its auto white balance stops near 2600 K. On: when either limit is reached the app brightens the picture itself, and takes the orange tint out of lamp light. It adds some grain. Manual exposure or manual white balance turns that half off.",
                      tone: .hint)
             } else {
                 Slider2("Shutter", value: Binding(

@@ -37,6 +37,8 @@ struct RenderSettings: Sendable {
     var highlightBloom: Double
     /// Brightness to add, as a multiple of linear light. See `LowLightAssist`.
     var exposureGain: Float = 1
+    /// What to multiply red, green and blue by, to take a colour cast out.
+    var tint = SIMD3<Float>(repeating: 1)
 
     @MainActor
     init(_ s: CameraSettings) {
@@ -341,9 +343,10 @@ final class BokehRenderer: @unchecked Sendable {
         guard let linearTex, let output = makeOutputFrame(w: w, h: h),
               let cmd = queue.makeCommandBuffer() else { return nil }
 
-        var gain = max(settings.exposureGain, 1)
+        var help = SIMD4<Float>(settings.tint, max(settings.exposureGain, 1))
         guard encode(cmd, nv12Pipeline, textures: [luma.texture, chroma.texture, linearTex],
-                     buffer: &gain, size: (w, h)) else { return nil }
+                     buffer: &help, bufferLength: MemoryLayout<SIMD4<Float>>.stride,
+                     size: (w, h)) else { return nil }
 
         // Segmentation feeds TWO features, not just bokeh: it also tells the
         // camera where to meter. Gating the whole analysis pass behind

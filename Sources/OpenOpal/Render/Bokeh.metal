@@ -66,7 +66,7 @@ inline float luminance(float3 c) {
 kernel void nv12_to_linear(texture2d<float, access::sample> lumaTex   [[texture(0)]],
                            texture2d<float, access::sample> chromaTex [[texture(1)]],
                            texture2d<float, access::write>  out       [[texture(2)]],
-                           constant float &gain [[buffer(0)]],
+                           constant float4 &help [[buffer(0)]],
                            uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= out.get_width() || gid.y >= out.get_height()) return;
 
@@ -85,11 +85,14 @@ kernel void nv12_to_linear(texture2d<float, access::sample> lumaTex   [[texture(
                         y - 0.1873 * cb - 0.4681 * cr,
                         y + 1.8556 * cb);
 
-    // Low light help: `gain` is 1 unless the sensor has run out of exposure.
-    // Shadows are multiplied by the full gain and the curve bends towards
-    // white, so a lamp in shot is not blown out by it. White stays white.
-    float3 lin = srgbToLinear(saturate(rgb));
-    lin = lin * gain / (1.0 + lin * (gain - 1.0));
+    // Low light help. `help.rgb` takes out a colour cast the camera's white
+    // balance could not, and `help.a` adds brightness once the sensor has run
+    // out of exposure. Both are 1 the rest of the time. Shadows get the full
+    // brightness and the curve bends towards white, so a lamp in shot is not
+    // blown out by it.
+    float  gain = help.a;
+    float3 lin = srgbToLinear(saturate(rgb)) * help.rgb;
+    lin = saturate(lin * gain / (1.0 + lin * (gain - 1.0)));
 
     out.write(float4(lin, 1.0), gid);
 }
