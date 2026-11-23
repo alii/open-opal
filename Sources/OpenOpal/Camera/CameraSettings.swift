@@ -163,7 +163,9 @@ final class CameraSettings {
     /// isn't a multiple of that pulse, you get rolling bands across the frame.
     /// Pick the frequency of your local grid: 60Hz in the US/Americas, 50Hz in
     /// most of Europe/Asia/Africa.
-    var antiBanding: AntiBanding = .hz60 { didSet { save() } }
+    /// Auto lets the camera work out the mains frequency. A fixed 60 Hz was
+    /// wrong for every country on 50 Hz mains.
+    var antiBanding: AntiBanding = .auto { didSet { save() } }
 
     enum AntiBanding: String, Codable, CaseIterable, Identifiable {
         case off  = "Off"
@@ -442,7 +444,7 @@ final class CameraSettings {
         manualFocus = false; afMode = .continuousVideo; lensPosition = 120
         limitAfRange = false; afRangeInfinity = 90; afRangeMacro = 160
         manualWhiteBalance = false; awbMode = .auto; whiteBalanceK = 5600; awbLock = false
-        antiBanding = .hz60
+        antiBanding = .auto
         sharpness = 1; lumaDenoise = 1; chromaDenoise = 4
         brightness = 0; contrast = 0; saturation = 0
     }
