@@ -26,6 +26,10 @@ for LIB in "$APP"/Contents/Frameworks/*.dylib; do
   codesign --force --timestamp --options runtime --sign "$IDENTITY" "$LIB"
 done
 
+# Seal the host metadata before signing; the camera sandbox cannot read the host.
+mkdir -p "$EXT/Contents/Resources"
+cp "$APP/Contents/Info.plist" "$EXT/Contents/Resources/OpenOpalHostInfo.plist"
+
 echo "==> camera extension"
 codesign --force --timestamp --options runtime \
   --entitlements "$ROOT/Sources/OpenOpalCameraExtension/OpenOpalCameraExtension.entitlements" \

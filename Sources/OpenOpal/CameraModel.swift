@@ -124,10 +124,12 @@ final class CameraModel {
             feederPollStarted = true
             // The feeder's poll below reconnects within a few seconds.
             installer.onActivated = { [feeder] in feeder.disconnect() }
+            installer.onWillReplace = { [feeder] in feeder.disconnect() }
             installer.updateIfOutdated()
-            Task { [feeder] in
+            Task { [feeder, installer] in
                 while true {
-                    feeder.connectIfNeeded()
+                    // Leave the old extension alone while it is being replaced.
+                    if installer.status != .installing { feeder.connectIfNeeded() }
                     try? await Task.sleep(for: .seconds(3))
                 }
             }

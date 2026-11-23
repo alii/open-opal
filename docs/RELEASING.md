@@ -35,6 +35,13 @@ same read-only check before signing. Run packaging before signing, since
 rewriting a Mach-O file invalidates any existing signature. The packaging tests
 compile tiny Mach-O fixtures on macOS without launching the app or camera.
 
+The release workflow gives the app, camera extension and launcher the same
+`CFBundleVersion`. `sign.sh` seals the built host Info.plist into the extension
+before signing it. An older extension cannot validate the new host, so the app
+replaces the installed extension the first time the new version launches.
+
+Run the camera-free producer and stream checks with `bash scripts/check-sink.sh`.
+
 ## Model downloads
 
 `fetch-models.sh` downloads each package member to its own sibling temporary
