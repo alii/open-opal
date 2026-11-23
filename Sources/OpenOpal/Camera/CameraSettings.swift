@@ -186,7 +186,7 @@ final class CameraSettings {
 
     // MARK: - Image tuning
 
-    var sharpness: Int = 1 { didSet { save() } } // 0..4
+    var sharpness: Int = 0 { didSet { save() } } // 0..4
     var lumaDenoise: Int = 1 { didSet { save() } } // 0..4
     /// Colour grain is the ugliest part of a dim picture, and smoothing it
     /// costs almost no detail, so this starts at its strongest.
@@ -272,8 +272,6 @@ final class CameraSettings {
     /// Follow the subject automatically instead of a fixed focal plane.
     var autoFocusSubject = true { didSet { save() } }
     var apertureShape: ApertureShape = .circular { didSet { save() } }
-    /// Bloom on specular highlights — what makes bokeh read as glass, not blur.
-    var highlightBloom: Double = 0.55 { didSet { save() } }
 
     enum ApertureShape: String, Codable, CaseIterable, Identifiable {
         case circular  = "Circular"
@@ -334,7 +332,6 @@ final class CameraSettings {
         if let value = saved.focusDistance, (0...1).contains(value) { focusDistance = value }
         if let value = saved.autoFocusSubject { autoFocusSubject = value }
         if let value = saved.apertureShape { apertureShape = value }
-        if let value = saved.highlightBloom, (0...1).contains(value) { highlightBloom = value }
     }
 
     private func save() {
@@ -376,8 +373,7 @@ final class CameraSettings {
             aperture: aperture,
             focusDistance: focusDistance,
             autoFocusSubject: autoFocusSubject,
-            apertureShape: apertureShape,
-            highlightBloom: highlightBloom
+            apertureShape: apertureShape
         )
         if let data = try? JSONEncoder().encode(saved) {
             preferences.set(data, forKey: Self.persistenceKey)
@@ -424,7 +420,6 @@ final class CameraSettings {
         var focusDistance: Double?
         var autoFocusSubject: Bool?
         var apertureShape: ApertureShape?
-        var highlightBloom: Double?
     }
 
     // MARK: - Presets
@@ -445,7 +440,7 @@ final class CameraSettings {
         limitAfRange = false; afRangeInfinity = 90; afRangeMacro = 160
         manualWhiteBalance = false; awbMode = .auto; whiteBalanceK = 5600; awbLock = false
         antiBanding = .auto
-        sharpness = 1; lumaDenoise = 1; chromaDenoise = 4
+        sharpness = 0; lumaDenoise = 1; chromaDenoise = 4
         brightness = 0; contrast = 0; saturation = 0
     }
 }

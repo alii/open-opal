@@ -34,7 +34,6 @@ struct RenderSettings: Sendable {
     var focusDistance: Double
     var aperture: Double
     var hexIris: Bool
-    var highlightBloom: Double
     /// Brightness to add, as a multiple of linear light. See `LowLightAssist`.
     var exposureGain: Float = 1
     /// What to multiply red, green and blue by, to take a colour cast out.
@@ -50,7 +49,6 @@ struct RenderSettings: Sendable {
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
-        highlightBloom = s.highlightBloom
     }
 }
 
@@ -117,8 +115,6 @@ final class BokehRenderer: @unchecked Sendable {
         var focusDepth: Float
         var aperture: Float
         var maxCoCPixels: Float
-        var highlightBloom: Float
-        var highlightThresh: Float
         var apertureBlades: Int32
         var matteStrength: Float
         var useDepth: Int32
@@ -656,8 +652,6 @@ final class BokehRenderer: @unchecked Sendable {
             focusDepth: focus,
             aperture: Float(s.aperture),
             maxCoCPixels: maxCoC,
-            highlightBloom: Float(s.highlightBloom),
-            highlightThresh: 0.75,
             apertureBlades: s.hexIris ? 6 : 0,
             matteStrength: s.autoFocusSubject ? 0.9 : 0.0,
             useDepth: s.uniformBlur ? 0 : 1

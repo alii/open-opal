@@ -119,12 +119,7 @@ struct Inspector: View {
                      tone: .hint)
             }
 
-            Card("Bokeh highlights", about: "Bokeh is how out-of-focus lights look. Through a real lens, a small bright light blurs into a bright disc in the shape of the lens opening.") {
-                Slider2("Highlight bloom", value: $settings.highlightBloom,
-                        range: 0...1,
-                        display: String(format: "%.0f%%", settings.highlightBloom * 100))
-                Note("How strongly bright pixels dominate the blur. Higher gives brighter, clearer discs.",
-                     tone: .hint)
+            Card("Blur shape", about: "Through a real lens, a small light in the background blurs into a disc in the shape of the lens opening. This picks that shape.") {
                 Choice("Aperture shape", selection: $settings.apertureShape, options: [
                     (.circular, "Circular"), (.hexagonal, "Hexagonal"),
                 ])
@@ -185,7 +180,7 @@ struct Inspector: View {
             }
         }
 
-        Card("Anti-banding", about: "Room lights flicker with the mains, too fast to see. A camera can catch that as dark bands rolling through the picture. Anti-banding times the shutter to the flicker. Pick the mains frequency of your country.") {
+        Card("Anti-banding", about: "Room lights flicker with the mains, too fast to see. A camera can catch that as dark bands rolling through the picture. Anti-banding times the shutter to the flicker. Auto lets the camera work out the mains frequency. Pick one yourself only if you still see bands.") {
             Choice("Mains frequency", selection: $settings.antiBanding,
                    options: CameraSettings.AntiBanding.allCases.map { ($0, $0.rawValue) })
                 .onChange(of: settings.antiBanding) { camera.push() }

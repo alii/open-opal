@@ -23,8 +23,6 @@ struct BokehUniforms {
     float  focusDepth;      // normalized scene depth of the focal plane, 0..1
     float  aperture;        // f-number; smaller = shallower depth of field
     float  maxCoCPixels;    // clamp, so a huge blur can't tank the frame rate
-    float  highlightBloom;  // 0..1, how strongly highlights blow out
-    float  highlightThresh; // linear luminance above which a pixel "blooms"
     int    apertureBlades;  // 0 = circular, 6 = hexagonal
     float  matteStrength;   // how hard the subject matte pins the subject sharp
     int    useDepth;        // 0 = uniform blur behind the subject (mask only)
@@ -281,20 +279,6 @@ kernel void bokeh_gather(texture2d<float, access::sample> colorTex [[texture(0)]
     // where the blur is actually wide.
     int sampleCount = clamp(int(radius * 2.5), MIN_SAMPLES, MAX_SAMPLES);
 
-    // Gamma-weighted accumulation — this is what actually produces bokeh BALLS.
-    //
-    // Averaging colour linearly spreads a bright glint's energy evenly across the
-    // disc, so it fades to a dim smudge. Averaging in a higher power instead lets
-    // bright samples dominate, then taking the root on the way out restores the
-    // level — the highlight survives as a distinct bright disc instead of being
-    // washed into its neighbours. p = 1 is a plain average (no bloom).
-    //
-    // The previous approach keyed off a luminance threshold of 0.75 in LINEAR
-    // light (~0.89 as displayed) and ramped to 1.25, above the maximum possible
-    // value — so almost nothing in a normal room ever crossed it, and even pure
-    // white only reached half strength. It was effectively dead code.
-    float p = 1.0 + u.highlightBloom * 6.0;
-
     for (int i = 0; i < sampleCount; ++i) {
         float t     = (float(i) + 0.5) / float(sampleCount);
         float r     = sqrt(t);                    // sqrt keeps the disc uniform
@@ -324,12 +308,12 @@ kernel void bokeh_gather(texture2d<float, access::sample> colorTex [[texture(0)]
         // background is not allowed to spill onto the subject.
         if (sCoC < 0.0 && centerCoC >= 0.0) reach = 1.0;
 
-        accum += pow(max(col, 0.0), p) * reach;
+        accum += max(col, 0.0) * reach;
         weightSum += reach;
     }
 
     float3 result = weightSum > 0.0001
-        ? pow(accum / weightSum, 1.0 / p)
+        ? accum / weightSum
         : centerCol;
     out.write(float4(result, 1.0), gid);
 }
