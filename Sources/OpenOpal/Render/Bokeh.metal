@@ -93,11 +93,12 @@ kernel void nv12_to_linear(texture2d<float, access::sample> lumaTex   [[texture(
     //
     // The colour fix fades out in deep shadow. Blue down there is mostly the
     // sensor's noise floor, and multiplying it turned dark skin and hair
-    // purple. Shadows get the same brightness without the colour shift.
+    // purple. Only the deepest shadows are left alone: a face in a dim room is
+    // itself very dark, and with a wider fade it stayed red beside a white wall.
     float  gain = help.a;
     float3 lin = srgbToLinear(saturate(rgb));
     float3 flat = float3(luminance(help.rgb));
-    lin *= mix(flat, help.rgb, smoothstep(0.001, 0.012, luminance(lin)));
+    lin *= mix(flat, help.rgb, smoothstep(0.0003, 0.003, luminance(lin)));
     lin = saturate(lin * gain / (1.0 + lin * (gain - 1.0)));
 
     out.write(float4(lin, 1.0), gid);
