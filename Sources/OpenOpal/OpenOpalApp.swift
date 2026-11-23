@@ -22,6 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     MenuBarFlyout(controller: controls).environment(camera)))
         // An accessory app rarely becomes active, so refresh when shown instead.
         controls.onShow = { [camera] in camera.autoLaunch.refresh() }
+        // `-showPanel float` or `-showPanel dock` opens the controls at launch,
+        // for looking at the panel without clicking the menu bar icon.
+        if let mode = UserDefaults.standard.string(forKey: "showPanel") {
+            controls.show(floating: mode == "float")
+        }
         Task { await camera.start() }
     }
 

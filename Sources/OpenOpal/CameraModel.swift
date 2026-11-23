@@ -240,7 +240,8 @@ final class CameraModel {
     }
 
     /// Steps in when the camera's auto exposure or white balance is stuck.
-    private var assist = LowLightAssist()
+    /// Readable so the status area can list everything it is doing.
+    private(set) var assist = LowLightAssist()
     private let assistClock = SampleClock()
     private var assistLoggedAt = Date.distantPast
 

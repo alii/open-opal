@@ -32,6 +32,11 @@ final class OpalDevice {
     private(set) var sensorName = ""
     private(set) var resolution = (w: 0, h: 0)
     private(set) var usbSpeed = ""
+    /// True when the camera came up on a USB 2 link. USB 2 carries about 40 MB
+    /// a second, and 1080p at 30 fps is 93, so the camera can only send about
+    /// 13 frames a second. A USB-C plug pushed in slowly, a USB 2 cable, or a
+    /// hub will all do this.
+    private(set) var usbIsSlow = false
 
     /// Live numbers straight from the device, so the UI never has to guess.
     private(set) var telemetry = Telemetry()
@@ -413,6 +418,10 @@ final class OpalDevice {
         if opal_get_info(handle, &name, 64, &speed, &w, &h) {
             sensorName = String(cString: name)
             resolution = (Int(w), Int(h))
+            usbIsSlow = speed > 0 && speed < 3
+            if usbIsSlow {
+                log.warning("the camera is on a USB 2 link, which is too slow for 1080p at 30 fps")
+            }
             usbSpeed = switch speed {
             case 4: "SuperSpeed+"
             case 3: "SuperSpeed"
