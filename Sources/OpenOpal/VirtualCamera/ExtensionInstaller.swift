@@ -187,6 +187,9 @@ extension ExtensionInstaller: OSSystemExtensionRequestDelegate {
             guard let installed = installed.first, let bundled = self.bundledVersion else { return }
             guard installed != bundled else {
                 log.info("system extension is current (\(bundled.short, privacy: .public)/\(bundled.build, privacy: .public))")
+                // Without this the panel went on offering to install a camera
+                // that was already installed and working.
+                self.status = .installed
                 return
             }
             log.notice("replacing system extension \(installed.short, privacy: .public)/\(installed.build, privacy: .public) with \(bundled.short, privacy: .public)/\(bundled.build, privacy: .public)")
