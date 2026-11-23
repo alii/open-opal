@@ -18,7 +18,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     /// without focus until the menu bar icon is used.
     private var staysOpen = false
     private var floatingSize = NSSize(width: 1180, height: 528)
-    private static let dockedSize = NSSize(width: 380, height: 520)
+    private static let dockedSize = NSSize(width: 380, height: 548)
     private static let floatingMinSize = NSSize(width: 860, height: 440)
     /// Called whenever the controls are brought on screen.
     var onShow: (() -> Void)?
@@ -37,7 +37,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.level = .floating
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        panel.minSize = NSSize(width: Self.dockedSize.width, height: 420)
+        panel.minSize = Self.dockedSize
         panel.contentViewController = content
         panel.delegate = self
         if let button = statusItem.button {
@@ -124,7 +124,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         snapReady = false
         statusItem.button?.highlight(false)
         panel.styleMask.remove(.resizable)
-        panel.minSize = NSSize(width: Self.dockedSize.width, height: 420)
+        panel.minSize = Self.dockedSize
         positionAtStatusItem()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(panel)

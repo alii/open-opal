@@ -25,26 +25,32 @@ struct QuickControls: View {
     var body: some View {
         @Bindable var settings = camera.settings
 
+        // Every row is always here. One that does not apply right now is
+        // dimmed, not removed, so the rows below it never jump.
         VStack(alignment: .leading, spacing: 14) {
             Toggle("Background blur", isOn: $settings.bokehEnabled)
-            if settings.bokehEnabled {
-                OpalSlider("Blur amount", value: $settings.blurAmount, range: 0...1,
-                           display: String(format: "f/%.1f", settings.aperture))
-            }
-            if settings.autoExposure {
-                ExposureCompensation()
-            }
+            OpalSlider("Blur amount", value: $settings.blurAmount, range: 0...1,
+                       display: settings.bokehEnabled ? String(format: "f/%.1f", settings.aperture) : "off")
+                .applies(settings.bokehEnabled)
+            ExposureCompensation()
+                .applies(settings.autoExposure)
             Choice("White balance", selection: $settings.manualWhiteBalance, options: [
                 (false, "Auto"), (true, "Manual"),
             ])
             .onChange(of: settings.manualWhiteBalance) { camera.push() }
-            if settings.manualWhiteBalance {
-                ColourTemperature()
-            }
+            ColourTemperature()
+                .applies(settings.manualWhiteBalance)
         }
         .font(Opal.label)
         .foregroundStyle(Opal.text)
         .toggleStyle(OpalSwitch())
+    }
+}
+
+private extension View {
+    /// Dims a control and stops it taking input while it has no effect.
+    func applies(_ applies: Bool) -> some View {
+        disabled(!applies).opacity(applies ? 1 : 0.32)
     }
 }
 

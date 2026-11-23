@@ -35,22 +35,11 @@ struct MenuBarFlyout: View {
                         .overlay { PreviewOverlays(compact: true) }
                         .clipped()
                     Rectangle().fill(Opal.line).frame(height: 1)
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            QuickControls()
-                            Button {
-                                controller.detach()
-                            } label: {
-                                Label("All settings and a bigger picture",
-                                      systemImage: "arrow.up.left.and.arrow.down.right")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.quiet)
-                        }
+                    // Always the same rows, so the panel is one fixed size and
+                    // has nothing to scroll.
+                    QuickControls()
                         .padding(16)
-                    }
-                    .scrollIndicators(.never)
-                    .scrollBounceBehavior(.basedOnSize)
+                    Spacer(minLength: 0)
                 }
             }
         }
