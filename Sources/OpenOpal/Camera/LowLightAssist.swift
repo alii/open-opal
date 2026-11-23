@@ -72,26 +72,33 @@ enum SceneSampler {
 ///
 /// Both have hard limits. In a dim room lit by warm lamps, one C1 sat at its
 /// top ISO of 1600 with the picture still close to black. Its auto white
-/// balance stopped at 2634 K with the lamps warmer than that, so a white wall
-/// came out orange, with three times as much red as blue. A manual white
-/// balance does not help: the camera accepts settings down to 1000 K, but the
-/// picture stops changing below about 2600 K.
+/// balance stopped at 2634 K with the lamps far warmer than that, so a white
+/// wall came out orange, with nine times as much red as blue.
 ///
-/// So the renderer does what the camera cannot. This watches the picture and
-/// works out how much brightness to add and how to shift the colour, only
-/// while the camera is stuck, and eases back to nothing when it is not.
+/// The camera accepts a manual white balance below where its auto mode stops.
+/// That brought red over blue down from nine to three, and then stopped
+/// helping somewhere above 1500 K. So this works in two steps. It first sets a
+/// lower white balance on the camera, which corrects the colour before the
+/// picture is compressed to 8 bits. Whatever tint is left once that has
+/// bottomed out, the renderer takes out. It also has the renderer add the
+/// brightness the sensor cannot. All of it applies only while the camera is
+/// stuck, and control goes back when it is not.
 struct LowLightAssist: Equatable {
     /// Brightness to add in the renderer, as a multiple of linear light.
     private(set) var gain = 1.0
-    /// What to multiply red, green and blue by, in linear light.
+    /// A white balance to send in place of auto, or nil to leave the camera to it.
+    private(set) var whiteBalanceK: Int?
+    /// What the renderer multiplies red, green and blue by, in linear light.
     private(set) var tint = SIMD3<Double>(repeating: 1)
 
     private var starved = false
-    private var warm = false
+    private var warmStreak = 0
+    private var tinting = false
 
     static let maxGain = 4.0
     /// The camera's auto white balance has been seen to stop near 2630 K.
     static let autoFloorK = 2750
+    static let takeoverRangeK = 1500.0...2900.0
     /// Aim a little warm. Fully neutral looks cold under lamps.
     static let wantedColour = SIMD3<Double>(1.06, 1, 0.94)
     /// Blue is the weakest channel under lamps, so it is mostly noise. Raising
@@ -102,7 +109,8 @@ struct LowLightAssist: Equatable {
     mutating func update(_ stats: SceneStats, iso: Int, reportedK: Int,
                          autoExposure: Bool, autoWhiteBalance: Bool) {
         updateGain(stats, iso: iso, allowed: autoExposure)
-        updateTint(stats, reportedK: reportedK, allowed: autoWhiteBalance)
+        updateWhiteBalance(stats, reportedK: reportedK, allowed: autoWhiteBalance)
+        updateTint(stats)
     }
 
     private mutating func updateGain(_ stats: SceneStats, iso: Int, allowed: Bool) {
@@ -118,18 +126,49 @@ struct LowLightAssist: Equatable {
         if abs(gain - wanted) < 0.01 { gain = wanted }
     }
 
-    private mutating func updateTint(_ stats: SceneStats, reportedK: Int, allowed: Bool) {
+    private mutating func updateWhiteBalance(_ stats: SceneStats, reportedK: Int, allowed: Bool) {
+        guard allowed else {
+            whiteBalanceK = nil
+            warmStreak = 0
+            return
+        }
+        guard let ratio = stats.redOverBlue else { return }
+
+        guard let current = whiteBalanceK else {
+            // Take over only when the camera is at its floor and the picture is
+            // still warm, and has been for two seconds.
+            let stuck = reportedK > 0 && reportedK <= Self.autoFloorK && ratio > 1.3
+            warmStreak = stuck ? warmStreak + 1 : 0
+            if warmStreak >= 4 { whiteBalanceK = reportedK }
+            return
+        }
+
+        // A lower setting tells the camera the light is warmer, and it adds blue.
+        let target = Self.wantedColour.x / Self.wantedColour.z
+        let error = log(ratio / target)
+        guard abs(error) > 0.04 else { return }
+        let next = Double(current) * min(max(exp(-0.3 * error), 0.93), 1.07)
+        if next > Self.takeoverRangeK.upperBound {
+            // The light is no longer warm, so the camera can cope by itself.
+            whiteBalanceK = nil
+            warmStreak = 0
+        } else {
+            whiteBalanceK = Int(max(next, Self.takeoverRangeK.lowerBound).rounded())
+        }
+    }
+
+    private mutating func updateTint(_ stats: SceneStats) {
+        // The renderer only takes over once the camera setting has nothing
+        // left to give. It lets go later than it steps in, so it does not
+        // flicker on and off at the edge.
+        let bottomedOut = whiteBalanceK.map { Double($0) <= Self.takeoverRangeK.lowerBound } ?? false
         var wanted = SIMD3<Double>(repeating: 1)
-        if allowed, let colour = stats.colour, let ratio = stats.redOverBlue {
-            // Step in only when the camera is at its floor and the picture is
-            // still warm. Let go later than that, so it does not flicker on
-            // and off at the edge.
-            let atFloor = reportedK > 0 && reportedK <= Self.autoFloorK
-            if atFloor, ratio > 1.3 { warm = true } else if !atFloor || ratio < 1.15 { warm = false }
-            if warm { wanted = Self.correction(for: colour) }
-        } else if !allowed {
-            warm = false
-        } else if warm {
+        if !bottomedOut {
+            tinting = false
+        } else if let colour = stats.colour, let ratio = stats.redOverBlue {
+            if ratio > 1.3 { tinting = true } else if ratio < 1.15 { tinting = false }
+            if tinting { wanted = Self.correction(for: colour) }
+        } else if tinting {
             // Too dark to measure this time. Keep what was there.
             wanted = tint
         }

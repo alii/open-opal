@@ -236,7 +236,7 @@ final class CameraModel {
     /// Send hot settings to the camera. Cheap — safe to call on every slider tick.
     /// The bridge coalesces and diffs, so nothing here blocks on USB.
     func push() {
-        device.apply(settings, holdingFocus: focusHeld)
+        device.apply(settings, holdingFocus: focusHeld, whiteBalanceK: assist.whiteBalanceK)
     }
 
     /// Steps in when the camera's auto exposure or white balance is stuck.
@@ -245,6 +245,8 @@ final class CameraModel {
     private var assistLoggedAt = Date.distantPast
 
     private func help(with stats: SceneStats) {
+        let before = assist.whiteBalanceK
+        defer { if assist.whiteBalanceK != before { push() } }
         guard settings.lowLightHelp else {
             assist = LowLightAssist()
             return
@@ -259,7 +261,7 @@ final class CameraModel {
         if now.timeIntervalSince(assistLoggedAt) >= 5 {
             assistLoggedAt = now
             let tint = assist.tint
-            assistLog.info("picture brightness \(stats.luma, format: .fixed(precision: 2)), red over blue \(stats.redOverBlue ?? 0, format: .fixed(precision: 2)). low light help: brightness x\(self.assist.gain, format: .fixed(precision: 1)), red x\(tint.x, format: .fixed(precision: 2)), green x\(tint.y, format: .fixed(precision: 2)), blue x\(tint.z, format: .fixed(precision: 2))")
+            assistLog.info("picture brightness \(stats.luma, format: .fixed(precision: 2)), red over blue \(stats.redOverBlue ?? 0, format: .fixed(precision: 2)). low light help: brightness x\(self.assist.gain, format: .fixed(precision: 1)), red x\(tint.x, format: .fixed(precision: 2)), green x\(tint.y, format: .fixed(precision: 2)), blue x\(tint.z, format: .fixed(precision: 2)), camera white balance \(self.assist.whiteBalanceK.map { "set to \($0) K" } ?? "left on auto", privacy: .public)")
         }
     }
 
