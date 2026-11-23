@@ -186,7 +186,9 @@ final class CameraSettings {
 
     var sharpness: Int = 1 { didSet { save() } } // 0..4
     var lumaDenoise: Int = 1 { didSet { save() } } // 0..4
-    var chromaDenoise: Int = 1 { didSet { save() } } // 0..4
+    /// Colour grain is the ugliest part of a dim picture, and smoothing it
+    /// costs almost no detail, so this starts at its strongest.
+    var chromaDenoise: Int = 4 { didSet { save() } } // 0..4
     var brightness: Int = 0 { didSet { save() } } // -10..10
     var contrast: Int = 0 { didSet { save() } } // -10..10
     var saturation: Int = 0 { didSet { save() } } // -10..10
@@ -441,7 +443,7 @@ final class CameraSettings {
         limitAfRange = false; afRangeInfinity = 90; afRangeMacro = 160
         manualWhiteBalance = false; awbMode = .auto; whiteBalanceK = 5600; awbLock = false
         antiBanding = .hz60
-        sharpness = 1; lumaDenoise = 1; chromaDenoise = 1
+        sharpness = 1; lumaDenoise = 1; chromaDenoise = 4
         brightness = 0; contrast = 0; saturation = 0
     }
 }
