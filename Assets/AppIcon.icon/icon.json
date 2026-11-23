@@ -43,6 +43,29 @@
       "name": "lens",
       "layers": [
         {
+          "image-name": "pupil.svg",
+          "name": "pupil",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0.92
+            }
+          ]
+        },
+        {
           "image-name": "ring.svg",
           "name": "ring",
           "glass": true,
