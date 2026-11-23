@@ -34,7 +34,10 @@ struct RenderSettings: Sendable {
     var focusDistance: Double
     var aperture: Double
     var hexIris: Bool
-    var highlightBloom: Double
+    /// Brightness to add, as a multiple of linear light. See `LowLightAssist`.
+    var exposureGain: Float = 1
+    /// What to multiply red, green and blue by, to take a colour cast out.
+    var tint = SIMD3<Float>(repeating: 1)
 
     @MainActor
     init(_ s: CameraSettings) {
@@ -46,7 +49,6 @@ struct RenderSettings: Sendable {
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
-        highlightBloom = s.highlightBloom
     }
 }
 
@@ -113,8 +115,6 @@ final class BokehRenderer: @unchecked Sendable {
         var focusDepth: Float
         var aperture: Float
         var maxCoCPixels: Float
-        var highlightBloom: Float
-        var highlightThresh: Float
         var apertureBlades: Int32
         var matteStrength: Float
         var useDepth: Int32
@@ -339,7 +339,9 @@ final class BokehRenderer: @unchecked Sendable {
         guard let linearTex, let output = makeOutputFrame(w: w, h: h),
               let cmd = queue.makeCommandBuffer() else { return nil }
 
+        var help = SIMD4<Float>(settings.tint, max(settings.exposureGain, 1))
         guard encode(cmd, nv12Pipeline, textures: [luma.texture, chroma.texture, linearTex],
+                     buffer: &help, bufferLength: MemoryLayout<SIMD4<Float>>.stride,
                      size: (w, h)) else { return nil }
 
         // Segmentation feeds TWO features, not just bokeh: it also tells the
@@ -650,8 +652,6 @@ final class BokehRenderer: @unchecked Sendable {
             focusDepth: focus,
             aperture: Float(s.aperture),
             maxCoCPixels: maxCoC,
-            highlightBloom: Float(s.highlightBloom),
-            highlightThresh: 0.75,
             apertureBlades: s.hexIris ? 6 : 0,
             matteStrength: s.autoFocusSubject ? 0.9 : 0.0,
             useDepth: s.uniformBlur ? 0 : 1

@@ -40,7 +40,11 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
-      - path: Assets/AppIcon.icns
+      # The layered icon. Xcode compiles it for macOS 26 and later, where it
+      # follows light, dark, clear and tinted modes, and also makes the flat
+      # AppIcon.icns that older systems use. Redraw it with tools/make_icon.py.
+      - path: Assets/AppIcon.icon
+        type: file
         buildPhase: resources
     info:
       path: Sources/OpenOpal/Info.plist
@@ -48,6 +52,7 @@ targets:
         CFBundleName: Open Opal
         CFBundleDisplayName: Open Opal
         CFBundleIconFile: AppIcon
+        CFBundleIconName: AppIcon
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "6"
         LSMinimumSystemVersion: "14.0"
@@ -103,6 +108,7 @@ targets:
         codeSign: true
     settings:
       base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: sh.alistair.open-opal
         SWIFT_OBJC_BRIDGING_HEADER: Sources/OpenOpal/OpenOpal-Bridging-Header.h
         HEADER_SEARCH_PATHS:

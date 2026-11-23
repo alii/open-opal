@@ -32,6 +32,11 @@ final class OpalDevice {
     private(set) var sensorName = ""
     private(set) var resolution = (w: 0, h: 0)
     private(set) var usbSpeed = ""
+    /// True when the camera came up on a USB 2 link. USB 2 carries about 40 MB
+    /// a second, and 1080p at 30 fps is 93, so the camera can only send about
+    /// 13 frames a second. A USB-C plug pushed in slowly, a USB 2 cable, or a
+    /// hub will all do this.
+    private(set) var usbIsSlow = false
 
     /// Live numbers straight from the device, so the UI never has to guess.
     private(set) var telemetry = Telemetry()
@@ -323,7 +328,9 @@ final class OpalDevice {
 
     /// `holdingFocus` keeps the lens where a click put it, whatever mode is
     /// chosen, by asking for one-shot autofocus.
-    func apply(_ s: CameraSettings, holdingFocus: Bool = false) {
+    /// `whiteBalanceK` replaces auto white balance with that setting, without
+    /// touching what the user saved. See `LowLightAssist`.
+    func apply(_ s: CameraSettings, holdingFocus: Bool = false, whiteBalanceK: Int? = nil) {
         guard let handle else { return }
         var c = OpalControls()
 
@@ -346,8 +353,8 @@ final class OpalDevice {
         }
         if holdingFocus { c.afMode = OPAL_AF_AUTO }
 
-        c.manualWhiteBalance = s.manualWhiteBalance
-        c.whiteBalanceK      = Int32(s.whiteBalanceK)
+        c.manualWhiteBalance = s.manualWhiteBalance || whiteBalanceK != nil
+        c.whiteBalanceK      = Int32(s.manualWhiteBalance ? s.whiteBalanceK : whiteBalanceK ?? s.whiteBalanceK)
         c.awbLock            = s.awbLock
         c.awbMode = switch s.awbMode {
         case .auto:            OPAL_AWB_AUTO
@@ -411,6 +418,10 @@ final class OpalDevice {
         if opal_get_info(handle, &name, 64, &speed, &w, &h) {
             sensorName = String(cString: name)
             resolution = (Int(w), Int(h))
+            usbIsSlow = speed > 0 && speed < 3
+            if usbIsSlow {
+                log.warning("the camera is on a USB 2 link, which is too slow for 1080p at 30 fps")
+            }
             usbSpeed = switch speed {
             case 4: "SuperSpeed+"
             case 3: "SuperSpeed"
@@ -459,6 +470,8 @@ final class OpalDevice {
         }
     }
 
+    private var telemetryLoggedAt = Date.distantPast
+
     private func pollTelemetry() {
         watchdog()
         guard let handle else { return }
@@ -470,6 +483,14 @@ final class OpalDevice {
                               iso: Int(t.reportedIso),
                               lensPosition: Int(t.reportedLensPosition),
                               colorTempK: Int(t.reportedColorTempK))
+        // What the camera's own auto exposure and white balance settled on.
+        // Without this a dark or tinted picture cannot be told apart from a
+        // camera that has simply run out of light.
+        let now = Date()
+        if now.timeIntervalSince(telemetryLoggedAt) >= 5 {
+            telemetryLoggedAt = now
+            log.info("camera chose exposure \(self.telemetry.exposureUs / 1000) ms, ISO \(self.telemetry.iso), white balance \(self.telemetry.colorTempK) K, at \(self.telemetry.fps, format: .fixed(precision: 1)) fps")
+        }
         if resolution.w == 0 { readInfo() }
     }
 }

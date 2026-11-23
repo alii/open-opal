@@ -12,13 +12,20 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     private var panel: ControlsPanel!
     private var clickMonitor: Any?
     private var isDragging = false
-    private var floatingSize = NSSize(width: 440, height: 780)
+    /// When the docked panel last hid itself because a click landed elsewhere.
+    private var autoHiddenAt = Date.distantPast
+    /// Set when the panel is opened at launch for a look, so it stays up
+    /// without focus until the menu bar icon is used.
+    private var staysOpen = false
+    private var floatingSize = NSSize(width: 1180, height: 528)
+    private static let dockedSize = NSSize(width: 380, height: 548)
+    private static let floatingMinSize = NSSize(width: 860, height: 440)
     /// Called whenever the controls are brought on screen.
     var onShow: (() -> Void)?
 
     func install(content: NSViewController) {
         let panel = ControlsPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 780),
+            contentRect: NSRect(origin: .zero, size: Self.dockedSize),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         self.panel = panel
         panel.title = "Open Opal"
@@ -30,7 +37,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.level = .floating
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        panel.minSize = NSSize(width: 400, height: 480)
+        panel.minSize = Self.dockedSize
         panel.contentViewController = content
         panel.delegate = self
         if let button = statusItem.button {
@@ -43,10 +50,10 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated {
                 // A floating window stays put, like any other window.
-                guard let self, !self.isDragging, !self.isFloating else { return }
+                guard let self, !self.isDragging, !self.isFloating, !self.staysOpen else { return }
                 // WindowServer can consume resize-edge clicks before AppKit.
                 guard !self.panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation) else { return }
-                self.panel.orderOut(nil)
+                self.hideAfterClickElsewhere()
             }
         }
         NotificationCenter.default.addObserver(
@@ -66,6 +73,11 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
             showMenu()
             return
         }
+        staysOpen = false
+        // A click on the icon first takes focus from the docked panel, which
+        // hides it. Without this check the same click then opened it again, so
+        // the icon could never close the panel.
+        if !isFloating, !panel.isVisible, Date().timeIntervalSince(autoHiddenAt) < 0.4 { return }
         if panel.isVisible && !isFloating {
             panel.orderOut(nil)
         } else {
@@ -87,21 +99,32 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         guard !isFloating else { return }
         isFloating = true
         panel.styleMask.insert(.resizable)
+        growToFloatingSize()
+    }
+
+    /// The floating window is much bigger than the docked panel: it has the
+    /// large picture and every setting. Keep the top edge where it was and stay
+    /// on screen.
+    private func growToFloatingSize() {
+        panel.minSize = Self.floatingMinSize
         let top = panel.frame.maxY
         let screen = panel.screen?.visibleFrame ?? panel.frame
-        let size = NSSize(width: min(floatingSize.width, screen.width), height: min(floatingSize.height, screen.height))
+        let size = NSSize(width: min(floatingSize.width, screen.width),
+                          height: min(floatingSize.height, screen.height))
+        let x = max(screen.minX, min(panel.frame.midX - size.width / 2, screen.maxX - size.width))
         panel.setFrame(
-            NSRect(
-                x: min(panel.frame.minX, screen.maxX - size.width),
-                y: max(screen.minY, top - size.height), width: size.width, height: size.height), display: true)
+            NSRect(x: x, y: max(screen.minY, min(top, screen.maxY) - size.height),
+                   width: size.width, height: size.height),
+            display: true, animate: true)
     }
 
     func dock() {
-        if isFloating { floatingSize = panel.frame.size }
+        if isFloating, panel.frame.width >= Self.floatingMinSize.width { floatingSize = panel.frame.size }
         isFloating = false
         snapReady = false
         statusItem.button?.highlight(false)
         panel.styleMask.remove(.resizable)
+        panel.minSize = Self.dockedSize
         positionAtStatusItem()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(panel)
@@ -109,6 +132,14 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     }
 
     func hide() { panel.orderOut(nil) }
+
+    /// Bring the controls up without a click on the menu bar icon.
+    func show(floating: Bool) {
+        positionAtStatusItem()
+        panel.makeKeyAndOrderFront(nil)
+        onShow?()
+        if floating { detach() } else { staysOpen = true }
+    }
 
     func drag(with event: NSEvent) {
         guard !isDragging else { return }
@@ -137,7 +168,13 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
             if next.type == .leftMouseUp { break }
         }
         isDragging = false
-        if snapReady { dock() } else { screenChanged() }
+        if snapReady {
+            dock()
+        } else {
+            // Dragged off the menu bar: it was still the small docked panel.
+            if panel.frame.width < Self.floatingMinSize.width { growToFloatingSize() }
+            screenChanged()
+        }
         snapReady = false
         statusItem.button?.highlight(false)
     }
@@ -172,8 +209,8 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
             let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)) })
         else { return }
         let visible = screen.visibleFrame
-        let width = min(400, visible.width)
-        let height = min(780, visible.height - 8)
+        let width = min(Self.dockedSize.width, visible.width)
+        let height = min(Self.dockedSize.height, visible.height - 8)
         panel.setFrame(
             NSRect(
                 x: max(visible.minX, min(anchor.midX - width / 2, visible.maxX - width)),
@@ -197,7 +234,13 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        if !isDragging && !isFloating { panel.orderOut(nil) }
+        if !isDragging && !isFloating && !staysOpen { hideAfterClickElsewhere() }
+    }
+
+    private func hideAfterClickElsewhere() {
+        guard panel.isVisible else { return }
+        autoHiddenAt = Date()
+        panel.orderOut(nil)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

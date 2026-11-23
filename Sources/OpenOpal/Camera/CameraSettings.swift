@@ -104,6 +104,9 @@ final class CameraSettings {
     /// Opt-in face metering. This runs person segmentation even with bokeh off,
     /// so leave it disabled until the user needs help with a backlit subject.
     var meterOnSubject = false { didSet { save() } }
+    /// Brighten the picture and fix a warm tint when the camera's own auto
+    /// exposure and auto white balance have hit their limits.
+    var lowLightHelp = true { didSet { save() } }
 
     /// Shutter expressed the way a photographer thinks about it.
     var shutterFraction: String {
@@ -160,7 +163,9 @@ final class CameraSettings {
     /// isn't a multiple of that pulse, you get rolling bands across the frame.
     /// Pick the frequency of your local grid: 60Hz in the US/Americas, 50Hz in
     /// most of Europe/Asia/Africa.
-    var antiBanding: AntiBanding = .hz60 { didSet { save() } }
+    /// Auto lets the camera work out the mains frequency. A fixed 60 Hz was
+    /// wrong for every country on 50 Hz mains.
+    var antiBanding: AntiBanding = .auto { didSet { save() } }
 
     enum AntiBanding: String, Codable, CaseIterable, Identifiable {
         case off  = "Off"
@@ -181,9 +186,11 @@ final class CameraSettings {
 
     // MARK: - Image tuning
 
-    var sharpness: Int = 1 { didSet { save() } } // 0..4
+    var sharpness: Int = 0 { didSet { save() } } // 0..4
     var lumaDenoise: Int = 1 { didSet { save() } } // 0..4
-    var chromaDenoise: Int = 1 { didSet { save() } } // 0..4
+    /// Colour grain is the ugliest part of a dim picture, and smoothing it
+    /// costs almost no detail, so this starts at its strongest.
+    var chromaDenoise: Int = 4 { didSet { save() } } // 0..4
     var brightness: Int = 0 { didSet { save() } } // -10..10
     var contrast: Int = 0 { didSet { save() } } // -10..10
     var saturation: Int = 0 { didSet { save() } } // -10..10
@@ -265,8 +272,6 @@ final class CameraSettings {
     /// Follow the subject automatically instead of a fixed focal plane.
     var autoFocusSubject = true { didSet { save() } }
     var apertureShape: ApertureShape = .circular { didSet { save() } }
-    /// Bloom on specular highlights — what makes bokeh read as glass, not blur.
-    var highlightBloom: Double = 0.55 { didSet { save() } }
 
     enum ApertureShape: String, Codable, CaseIterable, Identifiable {
         case circular  = "Circular"
@@ -297,6 +302,7 @@ final class CameraSettings {
         if let value = saved.evCompensation, (-9...9).contains(value) { evCompensation = value }
         if let value = saved.aeLock { aeLock = value }
         if let value = saved.meterOnSubject { meterOnSubject = value }
+        if let value = saved.lowLightHelp { lowLightHelp = value }
         if let value = saved.manualFocus { manualFocus = value }
         if let value = saved.lensPosition, (0...255).contains(value) { lensPosition = value }
         // One-shot AUTO is what click-to-focus and face tracking leave behind to
@@ -326,7 +332,6 @@ final class CameraSettings {
         if let value = saved.focusDistance, (0...1).contains(value) { focusDistance = value }
         if let value = saved.autoFocusSubject { autoFocusSubject = value }
         if let value = saved.apertureShape { apertureShape = value }
-        if let value = saved.highlightBloom, (0...1).contains(value) { highlightBloom = value }
     }
 
     private func save() {
@@ -342,6 +347,7 @@ final class CameraSettings {
             evCompensation: evCompensation,
             aeLock: aeLock,
             meterOnSubject: meterOnSubject,
+            lowLightHelp: lowLightHelp,
             manualFocus: manualFocus,
             lensPosition: lensPosition,
             afMode: afMode,
@@ -367,8 +373,7 @@ final class CameraSettings {
             aperture: aperture,
             focusDistance: focusDistance,
             autoFocusSubject: autoFocusSubject,
-            apertureShape: apertureShape,
-            highlightBloom: highlightBloom
+            apertureShape: apertureShape
         )
         if let data = try? JSONEncoder().encode(saved) {
             preferences.set(data, forKey: Self.persistenceKey)
@@ -388,6 +393,7 @@ final class CameraSettings {
         var evCompensation: Int?
         var aeLock: Bool?
         var meterOnSubject: Bool?
+        var lowLightHelp: Bool?
         var manualFocus: Bool?
         var lensPosition: Int?
         var afMode: AFMode?
@@ -414,7 +420,6 @@ final class CameraSettings {
         var focusDistance: Double?
         var autoFocusSubject: Bool?
         var apertureShape: ApertureShape?
-        var highlightBloom: Double?
     }
 
     // MARK: - Presets
@@ -429,12 +434,13 @@ final class CameraSettings {
     func reset() {
         autoExposure = true; evCompensation = 0; aeLock = false
         meterOnSubject = false
+        lowLightHelp = true
         exposureUs = 8_000; iso = 400
         manualFocus = false; afMode = .continuousVideo; lensPosition = 120
         limitAfRange = false; afRangeInfinity = 90; afRangeMacro = 160
         manualWhiteBalance = false; awbMode = .auto; whiteBalanceK = 5600; awbLock = false
-        antiBanding = .hz60
-        sharpness = 1; lumaDenoise = 1; chromaDenoise = 1
+        antiBanding = .auto
+        sharpness = 0; lumaDenoise = 1; chromaDenoise = 4
         brightness = 0; contrast = 0; saturation = 0
     }
 }

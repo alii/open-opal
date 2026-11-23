@@ -3,105 +3,127 @@ import SwiftUI
 struct MenuBarFlyout: View {
     @Environment(CameraModel.self) private var camera
     let controller: MenuBarPanelController
+
     var body: some View {
         GeometryReader { geometry in
+            // Wide enough for the picture and the settings side by side. The
+            // width decides, not the floating flag, because a panel being
+            // dragged off the menu bar floats before it has grown.
+            let wide = geometry.size.width >= 700
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "circle.grid.3x3.fill")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Open Opal")
-                                .font(.headline)
-                            Text(
-                                controller.snapReady
-                                    ? "Release to dock"
-                                    : controller.isFloating ? "Drag to move or dock" : "Drag to float"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(controller.snapReady ? .primary : .secondary)
+                header
+                if wide {
+                    HStack(spacing: 0) {
+                        LivePreview()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(.black)
+                            .overlay { PreviewOverlays(compact: false) }
+                            .clipped()
+                        Rectangle().fill(Opal.line).frame(width: 1)
+                        ScrollView {
+                            Controls()
+                                .padding(.horizontal, 18)
+                                .padding(.bottom, 12)
                         }
-                        Spacer(minLength: 0)
+                        .scrollIndicators(.never)
+                        .frame(width: 330)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 32)
-                    .contentShape(Rectangle())
-                    .overlay { PanelDragHandle(controller: controller) }
-                    Button {
-                        if controller.isFloating { controller.dock() } else { controller.detach() }
-                    } label: {
-                        Label(
-                            controller.isFloating ? "Dock" : "Float",
-                            systemImage: controller.isFloating
-                                ? "menubar.dock.rectangle" : "arrow.up.left.and.arrow.down.right"
-                        )
-                        .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .fixedSize()
-                    .help(controller.isFloating ? "Dock to menu bar" : "Float and resize controls")
-                    .accessibilityLabel(controller.isFloating ? "Dock to menu bar" : "Float controls")
-                    Button {
-                        controller.hide()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 22, height: 22)
-                    }
-                    .help("Hide controls. The camera keeps running.")
-                    .accessibilityLabel("Hide controls")
-                    .foregroundStyle(.secondary)
+                } else {
+                    LivePreview()
+                        .frame(height: geometry.size.width * 9 / 16)
+                        .background(.black)
+                        .overlay { PreviewOverlays(compact: true) }
+                        .clipped()
+                    Rectangle().fill(Opal.line).frame(height: 1)
+                    // Always the same rows, so the panel is one fixed size and
+                    // has nothing to scroll.
+                    QuickControls()
+                        .padding(16)
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.borderless)
-                .padding(12)
-
-                LivePreview()
-                    .frame(height: min(geometry.size.width * 9 / 16, geometry.size.height * 0.4))
-                    .clipped()
-
-                StatusLine()
-                    .font(.caption)
-                    .padding(8)
-                Divider()
-                Inspector()
-                    .clipped()
-                Divider()
-                HStack {
-                    Menu {
-                        Button("Trigger Autofocus") { camera.device.triggerAutofocus() }
-                            .disabled(!camera.device.state.isLive)
-                        Button(camera.previewFrozen ? "Unfreeze Preview" : "Freeze Preview") {
-                            camera.previewFrozen.toggle()
-                        }
-                        Button("Reset All Settings") {
-                            camera.settings.reset()
-                            camera.push()
-                        }
-                        Divider()
-                        Button("Quit Open Opal") { NSApp.terminate(nil) }
-                    } label: {
-                        Label("Camera", systemImage: "camera.aperture")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    Spacer()
-                    if controller.isFloating {
-                        Text("Resize from any edge")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Button("Reconnect") { Task { await camera.reconnect() } }
-                }
-                .controlSize(.small)
-                .padding(12)
             }
         }
         .background { shortcuts }
         .padding(.top, controller.isFloating ? 0 : 10)
-        .background(.regularMaterial, in: outline)
+        .background(Opal.background, in: outline)
         .clipShape(outline)
-        .overlay { outline.strokeBorder(.primary.opacity(0.10), lineWidth: 1) }
+        .overlay { outline.strokeBorder(Color.white.opacity(0.12), lineWidth: 1) }
+        .preferredColorScheme(.dark)
+        .tint(Opal.accent)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Rectangle().fill(Opal.accent).frame(width: 7, height: 7)
+                Caps("Open Opal", color: Opal.text)
+                Text(controller.snapReady
+                     ? "Release to dock"
+                     : controller.isFloating ? "Drag to move or dock" : "Drag to float")
+                    .font(Opal.note)
+                    .foregroundStyle(controller.snapReady ? Opal.accent : Opal.faint)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 28)
+            .contentShape(Rectangle())
+            .overlay { PanelDragHandle(controller: controller) }
+
+            actions
+
+            Button {
+                if controller.isFloating { controller.dock() } else { controller.detach() }
+            } label: {
+                Label(controller.isFloating ? "Dock" : "Float",
+                      systemImage: controller.isFloating
+                        ? "menubar.dock.rectangle" : "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.quiet)
+            .help(controller.isFloating ? "Dock to the menu bar" : "Float: all settings and a bigger picture")
+
+            Button {
+                controller.hide()
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+            }
+            .buttonStyle(.quiet)
+            .help("Hide the controls. The camera keeps running.")
+            .accessibilityLabel("Hide controls")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// Everything that acts on the whole app or the whole camera, in one place.
+    private var actions: some View {
+        Menu {
+            Button("Focus Now") { camera.device.triggerAutofocus() }
+                .disabled(!camera.device.state.isLive)
+            Button(camera.previewFrozen ? "Unfreeze Preview" : "Freeze Preview") {
+                camera.previewFrozen.toggle()
+            }
+            Button("Reconnect Camera") { Task { await camera.reconnect() } }
+            Divider()
+            Button("Reset All Settings") {
+                camera.settings.reset()
+                camera.settings.resetBokeh()
+                camera.push()
+            }
+            Divider()
+            Button("Quit Open Opal") { NSApp.terminate(nil) }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Opal.text)
+                .frame(width: 30, height: 26)
+                .overlay { RoundedRectangle(cornerRadius: Opal.corner).strokeBorder(Opal.line, lineWidth: 1) }
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Focus now, freeze the preview, reconnect, reset, quit")
+        .accessibilityLabel("More actions")
     }
 
     private var outline: PanelOutline {
@@ -125,6 +147,21 @@ struct MenuBarFlyout: View {
         .frame(width: 0, height: 0)
         .opacity(0)
         .accessibilityHidden(true)
+    }
+}
+
+/// What is drawn over the picture: the camera-style readout, and above it the
+/// connection state and the restart notice.
+private struct PreviewOverlays: View {
+    let compact: Bool
+
+    var body: some View {
+        // The readout hugs the picture, which keeps its 16:9 shape inside
+        // whatever room the preview has.
+        LiveStatus(compact: compact)
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay { PreviewStatus() }
     }
 }
 
@@ -162,57 +199,9 @@ private struct LivePreview: View {
                     }
                 }
             }
-    }
-}
-
-/// Connection state and live numbers, also on their own so that a new reading
-/// redraws one line of text.
-private struct StatusLine: View {
-    @Environment(CameraModel.self) private var camera
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            statusLine
-            if showsBootLog, !camera.device.bootLog.isEmpty {
-                // The bridge narrates the takeover as it happens.
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(camera.device.bootLog.suffix(6).enumerated()), id: \.offset) { _, line in
-                        Text(line).lineLimit(1).truncationMode(.tail)
-                    }
-                }
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var showsBootLog: Bool {
-        switch camera.device.state {
-        case .searching, .connecting, .failed: true
-        case .notFound, .streaming: false
-        }
-    }
-
-    @ViewBuilder
-    private var statusLine: some View {
-        switch camera.device.state {
-        case .searching, .connecting:
-            HStack {
-                ProgressView().controlSize(.small)
-                Text(camera.isRebooting ? "Rebooting camera…" : "Connecting…")
-            }
-        case .notFound:
-            Text("No Opal C1 found. Connect your camera over USB.")
-        case .failed(let message):
-            Text(message).foregroundStyle(.red).textSelection(.enabled)
-                .lineLimit(3).help(message)
-        case .streaming:
-            Text(
-                "\(camera.device.resolution.h)p · \(camera.device.telemetry.fps, specifier: "%.0f") fps · \(camera.device.telemetry.latencyMs, specifier: "%.0f") ms"
-            )
-            .monospacedDigit()
-        }
+            // The picture keeps its shape and sits in the middle of whatever
+            // room it is given.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -221,7 +210,7 @@ private struct FocusReticle: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(.yellow.opacity(0.9), lineWidth: 1.5)
+            .strokeBorder(Opal.accent, lineWidth: 1.5)
             .frame(width: 52, height: 52)
             .scaleEffect(scale)
             .onAppear {

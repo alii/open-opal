@@ -23,8 +23,6 @@ struct BokehUniforms {
     float  focusDepth;      // normalized scene depth of the focal plane, 0..1
     float  aperture;        // f-number; smaller = shallower depth of field
     float  maxCoCPixels;    // clamp, so a huge blur can't tank the frame rate
-    float  highlightBloom;  // 0..1, how strongly highlights blow out
-    float  highlightThresh; // linear luminance above which a pixel "blooms"
     int    apertureBlades;  // 0 = circular, 6 = hexagonal
     float  matteStrength;   // how hard the subject matte pins the subject sharp
     int    useDepth;        // 0 = uniform blur behind the subject (mask only)
@@ -66,6 +64,7 @@ inline float luminance(float3 c) {
 kernel void nv12_to_linear(texture2d<float, access::sample> lumaTex   [[texture(0)]],
                            texture2d<float, access::sample> chromaTex [[texture(1)]],
                            texture2d<float, access::write>  out       [[texture(2)]],
+                           constant float4 &help [[buffer(0)]],
                            uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= out.get_width() || gid.y >= out.get_height()) return;
 
@@ -84,7 +83,23 @@ kernel void nv12_to_linear(texture2d<float, access::sample> lumaTex   [[texture(
                         y - 0.1873 * cb - 0.4681 * cr,
                         y + 1.8556 * cb);
 
-    out.write(float4(srgbToLinear(saturate(rgb)), 1.0), gid);
+    // Low light help. `help.rgb` takes out a colour cast the camera's white
+    // balance could not, and `help.a` adds brightness once the sensor has run
+    // out of exposure. Both are 1 the rest of the time. Shadows get the full
+    // brightness and the curve bends towards white, so a lamp in shot is not
+    // blown out by it.
+    //
+    // The colour fix fades out in deep shadow. Blue down there is mostly the
+    // sensor's noise floor, and multiplying it turned dark skin and hair
+    // purple. Only the deepest shadows are left alone: a face in a dim room is
+    // itself very dark, and with a wider fade it stayed red beside a white wall.
+    float  gain = help.a;
+    float3 lin = srgbToLinear(saturate(rgb));
+    float3 flat = float3(luminance(help.rgb));
+    lin *= mix(flat, help.rgb, smoothstep(0.0003, 0.003, luminance(lin)));
+    lin = saturate(lin * gain / (1.0 + lin * (gain - 1.0)));
+
+    out.write(float4(lin, 1.0), gid);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,20 +279,6 @@ kernel void bokeh_gather(texture2d<float, access::sample> colorTex [[texture(0)]
     // where the blur is actually wide.
     int sampleCount = clamp(int(radius * 2.5), MIN_SAMPLES, MAX_SAMPLES);
 
-    // Gamma-weighted accumulation — this is what actually produces bokeh BALLS.
-    //
-    // Averaging colour linearly spreads a bright glint's energy evenly across the
-    // disc, so it fades to a dim smudge. Averaging in a higher power instead lets
-    // bright samples dominate, then taking the root on the way out restores the
-    // level — the highlight survives as a distinct bright disc instead of being
-    // washed into its neighbours. p = 1 is a plain average (no bloom).
-    //
-    // The previous approach keyed off a luminance threshold of 0.75 in LINEAR
-    // light (~0.89 as displayed) and ramped to 1.25, above the maximum possible
-    // value — so almost nothing in a normal room ever crossed it, and even pure
-    // white only reached half strength. It was effectively dead code.
-    float p = 1.0 + u.highlightBloom * 6.0;
-
     for (int i = 0; i < sampleCount; ++i) {
         float t     = (float(i) + 0.5) / float(sampleCount);
         float r     = sqrt(t);                    // sqrt keeps the disc uniform
@@ -307,12 +308,12 @@ kernel void bokeh_gather(texture2d<float, access::sample> colorTex [[texture(0)]
         // background is not allowed to spill onto the subject.
         if (sCoC < 0.0 && centerCoC >= 0.0) reach = 1.0;
 
-        accum += pow(max(col, 0.0), p) * reach;
+        accum += max(col, 0.0) * reach;
         weightSum += reach;
     }
 
     float3 result = weightSum > 0.0001
-        ? pow(accum / weightSum, 1.0 / p)
+        ? accum / weightSum
         : centerCol;
     out.write(float4(result, 1.0), gid);
 }
