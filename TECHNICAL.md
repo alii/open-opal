@@ -223,7 +223,9 @@ release their queue.
 
 An extension only trusts the exact app build it was signed with, so an old
 extension turns away a newer app. The app replaces the installed extension at
-launch when its version or build number differs. Every change to the app or the
+launch when its version or build number differs. It stops feeding the old one
+first, and starts itself again once the new one is in, because a process that
+was running during the swap never sees the new camera. Every change to the app or the
 extension must raise the app, extension and launcher build numbers together, or
 the old extension stays and the picture never reaches other apps.
 

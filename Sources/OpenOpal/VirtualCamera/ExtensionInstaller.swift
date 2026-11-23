@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import OSLog
@@ -48,6 +49,22 @@ final class ExtensionInstaller: NSObject {
     /// of the old one here, so macOS is not asked to stop an extension that
     /// this app is still feeding.
     var onWillReplace: (() -> Void)?
+    private var isReplacing = false
+
+    /// Start the app again, as a fresh process.
+    ///
+    /// A process that was running while the extension was replaced never sees
+    /// the new camera: CoreMediaIO keeps the old, dead one in its device list.
+    /// A fresh process sees the new one at once, so the picture would
+    /// otherwise stay off in other apps until the user quit and reopened.
+    private func relaunch() {
+        log.notice("starting the app again so it can see the replaced camera extension")
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundleURL.path]
+        try? task.run()
+        NSApplication.shared.terminate(nil)
+    }
 
     /// What the app can actually see, from inside its own process. macOS reports
     /// several very different failures as the same misleading "Extension not
@@ -174,6 +191,7 @@ extension ExtensionInstaller: OSSystemExtensionRequestDelegate {
             }
             log.notice("replacing system extension \(installed.short, privacy: .public)/\(installed.build, privacy: .public) with \(bundled.short, privacy: .public)/\(bundled.build, privacy: .public)")
             self.status = .installing
+            self.isReplacing = true
             self.onWillReplace?()
             try? await Task.sleep(for: .seconds(1))
             self.install()
@@ -193,6 +211,7 @@ extension ExtensionInstaller: OSSystemExtensionRequestDelegate {
             log.info("system extension activated (result \(result.rawValue))")
             self.status = .installed
             self.onActivated?()
+            if self.isReplacing { self.relaunch() }
         }
     }
 
