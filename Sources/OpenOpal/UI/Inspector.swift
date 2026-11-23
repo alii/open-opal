@@ -348,6 +348,18 @@ struct Inspector: View {
 
             Stepper("\(settings.fps) fps", value: $settings.fps,
                     in: 5...settings.outputMode.maxFps, step: 5)
+            if settings.fps > 30 {
+                Note("Leave this at 30 unless you have a reason. Other apps only ever get 30 frames a second from Open Opal, so the extra frames show in this preview and nowhere else. They also cost light: at \(settings.fps) fps each frame has less time to collect it, so the picture is darker and grainier indoors.",
+                     tone: .warning)
+                Button("Go back to 30 fps") { settings.fps = 30 }
+            } else if settings.fps < 30 {
+                Note("Leave this at 30 unless you have a reason. Below 30 the picture looks choppy in calls. It does let in more light, which can help in a very dark room.",
+                     tone: .warning)
+                Button("Go back to 30 fps") { settings.fps = 30 }
+            } else {
+                Note("30 is the best choice for nearly everyone. It is what other apps receive, and it gives each frame the most time to collect light.",
+                     tone: .hint)
+            }
 
             Note("The sensor always captures 3840×2160. 1080p and 720p are scaled on the camera's ISP before USB.",
                  tone: .hint)
