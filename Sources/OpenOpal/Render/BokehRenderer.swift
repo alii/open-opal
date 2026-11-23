@@ -35,6 +35,8 @@ struct RenderSettings: Sendable {
     var aperture: Double
     var hexIris: Bool
     var highlightBloom: Double
+    /// Brightness to add, as a multiple of linear light. See `LowLightAssist`.
+    var exposureGain: Float = 1
 
     @MainActor
     init(_ s: CameraSettings) {
@@ -339,8 +341,9 @@ final class BokehRenderer: @unchecked Sendable {
         guard let linearTex, let output = makeOutputFrame(w: w, h: h),
               let cmd = queue.makeCommandBuffer() else { return nil }
 
+        var gain = max(settings.exposureGain, 1)
         guard encode(cmd, nv12Pipeline, textures: [luma.texture, chroma.texture, linearTex],
-                     size: (w, h)) else { return nil }
+                     buffer: &gain, size: (w, h)) else { return nil }
 
         // Segmentation feeds TWO features, not just bokeh: it also tells the
         // camera where to meter. Gating the whole analysis pass behind

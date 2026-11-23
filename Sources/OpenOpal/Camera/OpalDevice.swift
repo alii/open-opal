@@ -323,7 +323,9 @@ final class OpalDevice {
 
     /// `holdingFocus` keeps the lens where a click put it, whatever mode is
     /// chosen, by asking for one-shot autofocus.
-    func apply(_ s: CameraSettings, holdingFocus: Bool = false) {
+    /// `whiteBalanceK` replaces auto white balance with that setting, without
+    /// touching what the user saved. See `LowLightAssist`.
+    func apply(_ s: CameraSettings, holdingFocus: Bool = false, whiteBalanceK: Int? = nil) {
         guard let handle else { return }
         var c = OpalControls()
 
@@ -346,8 +348,8 @@ final class OpalDevice {
         }
         if holdingFocus { c.afMode = OPAL_AF_AUTO }
 
-        c.manualWhiteBalance = s.manualWhiteBalance
-        c.whiteBalanceK      = Int32(s.whiteBalanceK)
+        c.manualWhiteBalance = s.manualWhiteBalance || whiteBalanceK != nil
+        c.whiteBalanceK      = Int32(s.manualWhiteBalance ? s.whiteBalanceK : whiteBalanceK ?? s.whiteBalanceK)
         c.awbLock            = s.awbLock
         c.awbMode = switch s.awbMode {
         case .auto:            OPAL_AWB_AUTO
@@ -459,6 +461,8 @@ final class OpalDevice {
         }
     }
 
+    private var telemetryLoggedAt = Date.distantPast
+
     private func pollTelemetry() {
         watchdog()
         guard let handle else { return }
@@ -470,6 +474,14 @@ final class OpalDevice {
                               iso: Int(t.reportedIso),
                               lensPosition: Int(t.reportedLensPosition),
                               colorTempK: Int(t.reportedColorTempK))
+        // What the camera's own auto exposure and white balance settled on.
+        // Without this a dark or tinted picture cannot be told apart from a
+        // camera that has simply run out of light.
+        let now = Date()
+        if now.timeIntervalSince(telemetryLoggedAt) >= 5 {
+            telemetryLoggedAt = now
+            log.info("camera chose exposure \(self.telemetry.exposureUs / 1000) ms, ISO \(self.telemetry.iso), white balance \(self.telemetry.colorTempK) K, at \(self.telemetry.fps, format: .fixed(precision: 1)) fps")
+        }
         if resolution.w == 0 { readInfo() }
     }
 }

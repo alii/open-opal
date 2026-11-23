@@ -3,6 +3,8 @@ import Metal
 import Observation
 import SwiftUI
 
+private let assistLog = Logger(subsystem: "com.openopal", category: "device")
+
 /// Ties the device, the settings, and the renderer together, and owns the one
 /// rule that keeps the UI honest: hot settings stream to the camera instantly,
 /// cold ones (resolution/fps) need the Myriad rebooted, so we make the user ask.
@@ -83,6 +85,7 @@ final class CameraModel {
         captureGeneration = gate.invalidate()
         latestFrame = nil
         meteringSession.reset()
+        assist = LowLightAssist()
         renderer?.resetCaptureState()
         configureSubjectTracking()
         configureFrameDelivery()
@@ -149,6 +152,12 @@ final class CameraModel {
             // Each device pipeline retains this immutable generation.
             guard let self, let rendererGeneration else { return }
             let arrived = CFAbsoluteTimeGetCurrent()
+            if self.assistClock.due(every: 0.5), let stats = SceneSampler.sample(pixelBuffer) {
+                Task { @MainActor in
+                    guard self.captureGeneration == generation, self.device.state.isLive else { return }
+                    self.help(with: stats)
+                }
+            }
             guard self.gate.tryEnter(generation: generation) else {
                 self.stats.dropped()
                 return
@@ -163,7 +172,9 @@ final class CameraModel {
                     self.syncRenderer()
                     let seq = self.nextSequence
                     self.nextSequence += 1
-                    return (renderer, RenderSettings(self.settings), seq)
+                    var snapshot = RenderSettings(self.settings)
+                    snapshot.exposureGain = Float(self.assist.gain)
+                    return (renderer, snapshot, seq)
                 }) else { return }
                 let (renderer, snapshot, seq) = work
                 var analysisForFrame: BokehRenderer.FrameAnalysis?
@@ -224,7 +235,39 @@ final class CameraModel {
     /// Send hot settings to the camera. Cheap — safe to call on every slider tick.
     /// The bridge coalesces and diffs, so nothing here blocks on USB.
     func push() {
-        device.apply(settings, holdingFocus: focusHeld)
+        device.apply(settings, holdingFocus: focusHeld, whiteBalanceK: assist.whiteBalanceK)
+    }
+
+    /// Steps in when the camera's auto exposure or white balance is stuck.
+    private var assist = LowLightAssist()
+    private let assistClock = SampleClock()
+    private var assistLoggedAt = Date.distantPast
+
+    private func help(with stats: SceneStats) {
+        let before = assist
+        guard settings.lowLightHelp else {
+            assist = LowLightAssist()
+            if before.whiteBalanceK != nil { push() }
+            return
+        }
+        assist.update(stats,
+                      iso: device.telemetry.iso,
+                      reportedK: device.telemetry.colorTempK,
+                      autoExposure: settings.autoExposure && !settings.aeLock,
+                      autoWhiteBalance: !settings.manualWhiteBalance && settings.awbMode == .auto
+                          && !settings.awbLock)
+        let now = Date()
+        if now.timeIntervalSince(assistLoggedAt) >= 5 {
+            assistLoggedAt = now
+            assistLog.info("picture brightness \(stats.luma, format: .fixed(precision: 2)), red over blue \(stats.redOverBlue ?? 0, format: .fixed(precision: 2)), low light help adds \(self.assist.gain, format: .fixed(precision: 1))x brightness, white balance \(self.assist.whiteBalanceK.map { "\($0) K" } ?? "left to the camera", privacy: .public)")
+        }
+        guard assist.whiteBalanceK != before.whiteBalanceK else { return }
+        if let kelvin = assist.whiteBalanceK, before.whiteBalanceK == nil {
+            assistLog.info("low light help took over white balance at \(kelvin) K")
+        } else if assist.whiteBalanceK == nil {
+            assistLog.info("low light help handed white balance back to the camera")
+        }
+        push()
     }
 
     /// True after a click on the picture: the lens focused there and is holding.

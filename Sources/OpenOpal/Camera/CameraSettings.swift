@@ -104,6 +104,9 @@ final class CameraSettings {
     /// Opt-in face metering. This runs person segmentation even with bokeh off,
     /// so leave it disabled until the user needs help with a backlit subject.
     var meterOnSubject = false { didSet { save() } }
+    /// Brighten the picture and fix a warm tint when the camera's own auto
+    /// exposure and auto white balance have hit their limits.
+    var lowLightHelp = true { didSet { save() } }
 
     /// Shutter expressed the way a photographer thinks about it.
     var shutterFraction: String {
@@ -297,6 +300,7 @@ final class CameraSettings {
         if let value = saved.evCompensation, (-9...9).contains(value) { evCompensation = value }
         if let value = saved.aeLock { aeLock = value }
         if let value = saved.meterOnSubject { meterOnSubject = value }
+        if let value = saved.lowLightHelp { lowLightHelp = value }
         if let value = saved.manualFocus { manualFocus = value }
         if let value = saved.lensPosition, (0...255).contains(value) { lensPosition = value }
         // One-shot AUTO is what click-to-focus and face tracking leave behind to
@@ -342,6 +346,7 @@ final class CameraSettings {
             evCompensation: evCompensation,
             aeLock: aeLock,
             meterOnSubject: meterOnSubject,
+            lowLightHelp: lowLightHelp,
             manualFocus: manualFocus,
             lensPosition: lensPosition,
             afMode: afMode,
@@ -388,6 +393,7 @@ final class CameraSettings {
         var evCompensation: Int?
         var aeLock: Bool?
         var meterOnSubject: Bool?
+        var lowLightHelp: Bool?
         var manualFocus: Bool?
         var lensPosition: Int?
         var afMode: AFMode?
@@ -429,6 +435,7 @@ final class CameraSettings {
     func reset() {
         autoExposure = true; evCompensation = 0; aeLock = false
         meterOnSubject = false
+        lowLightHelp = true
         exposureUs = 8_000; iso = 400
         manualFocus = false; afMode = .continuousVideo; lensPosition = 120
         limitAfRange = false; afRangeInfinity = 90; afRangeMacro = 160
