@@ -174,8 +174,8 @@ private struct LightControls: View {
                     .onChange(of: settings.aeLock) { camera.push() }
                 Note("Freezes the shutter and ISO where they are now, so the brightness stops changing.", tone: .hint)
 
-                Toggle("Meter on subject", isOn: $settings.meterOnSubject)
-                Note("Auto-exposure normally measures the whole picture. On: it measures only the box around you, so a bright window behind you does not leave your face dark. The box comes from the person mask, which then runs even with blur off.",
+                Toggle("Expose for your face", isOn: $settings.exposeForFace)
+                Note("The camera measures the whole picture, so a bright window behind you leaves your face dark, and turning towards it can make you too bright. On: the app looks at how bright your face is and moves the camera's exposure compensation up or down by up to 3 steps. What it added is shown on the picture. The Brightness slider still works, and sets how bright it aims for.",
                      tone: .hint)
 
                 Toggle("Low light help", isOn: $settings.lowLightHelp)
@@ -200,7 +200,7 @@ private struct LightControls: View {
             OpalSlider("Lift shadows", value: $settings.shadowLift, range: 0...1,
                        display: settings.shadowLift > 0
                            ? String(format: "%.0f%%", settings.shadowLift * 100) : "off")
-            Note("Brightens the dark parts of the picture much more than the bright parts. Use it when a window or lamp lights one side of your face. The app does this, after the camera has set its exposure. More of it shows more grain.",
+            Note("Brightens the dark parts of the picture much more than the bright parts. Use it when a window or lamp lights one side of your face. The app does this, after the camera has set its exposure. More of it shows more grain, so it backs off when low light help is adding brightness.",
                  tone: .hint)
 
             Choice("Anti-banding", selection: $settings.antiBanding,

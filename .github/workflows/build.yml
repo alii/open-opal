@@ -82,6 +82,9 @@ jobs:
       - name: Run camera-free sink regressions
         run: bash scripts/check-sink.sh
 
+      - name: Run camera-free settings regressions
+        run: bash scripts/check-settings.sh
+
       - name: Generate the Xcode project
         run: xcodegen generate
 

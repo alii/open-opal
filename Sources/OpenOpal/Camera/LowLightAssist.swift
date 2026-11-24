@@ -91,7 +91,8 @@ struct LowLightAssist: Equatable {
     /// What the renderer multiplies red, green and blue by, in linear light.
     private(set) var tint = SIMD3<Double>(repeating: 1)
 
-    private var starved = false
+    /// The camera has no exposure left to give.
+    private(set) var starved = false
     private var warmStreak = 0
     private var tinting = false
 

@@ -117,9 +117,12 @@ struct LiveStatus: View {
             blur = Line("blur", "Blur off")
         }
 
-        let metering = settings.meterOnSubject && settings.autoExposure
-            ? Line("meter", "Exposure measured on you", on: true)
-            : Line("meter", "Exposure measured on the whole picture")
+        let steps = camera.faceExposure.offset
+        let metering = camera.focusHeld
+            ? Line("meter", "Focus and exposure held on your click", on: true)
+            : steps != 0
+            ? Line("meter", "Exposure \(steps > 0 ? "+" : "−")\(abs(steps)) for your face", on: true)
+            : Line("meter", camera.facesExposure ? "Exposure right for your face" : "Exposure set by the camera")
 
         let helping = settings.lowLightHelp
         let brightness = helping && assist.gain > 1.02
@@ -139,8 +142,8 @@ struct LiveStatus: View {
                    help: "The camera's white balance could go no further, so the app is removing the rest of the orange.")
             : Line("tint", "No colour shift")
 
-        let shadows = settings.shadowLift > 0.005
-            ? Line("shadows", String(format: "Shadows lifted %.0f%%", settings.shadowLift * 100), on: true)
+        let shadows = camera.shadowLift > 0.005
+            ? Line("shadows", String(format: "Shadows lifted %.0f%%", camera.shadowLift * 100), on: true)
             : Line("shadows", "Shadows not lifted")
 
         let virtual: Line

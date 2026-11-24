@@ -466,7 +466,7 @@ struct RenderChecks {
         defer { preferences.removePersistentDomain(forName: domain) }
         let settings = CameraSettings(preferences: preferences)
         settings.bokehEnabled = false
-        settings.meterOnSubject = false
+        settings.shadowLift = 0
         checkNeutralRamp(settings: settings)
         checkOwnedOutput(settings: settings)
         checkAnalysisStorage()
