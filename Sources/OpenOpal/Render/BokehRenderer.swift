@@ -36,6 +36,8 @@ struct RenderSettings: Sendable {
     var hexIris: Bool
     /// Brightness to add, as a multiple of linear light. See `LowLightAssist`.
     var exposureGain: Float = 1
+    /// 0 to 1. How much to brighten the dark parts of the picture.
+    var shadowLift: Float
     /// What to multiply red, green and blue by, to take a colour cast out.
     var tint = SIMD3<Float>(repeating: 1)
 
@@ -49,6 +51,7 @@ struct RenderSettings: Sendable {
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
+        shadowLift = Float(s.shadowLift)
     }
 }
 
@@ -109,6 +112,12 @@ final class BokehRenderer: @unchecked Sendable {
     /// Latest neural results, written by the analysis task and read by the
     /// render loop. Never blocks the render loop.
     private let analysis = AnalysisStore()
+
+    /// Matches `LightUniforms` in Bokeh.metal.
+    private struct LightUniforms {
+        var tintAndGain: SIMD4<Float>
+        var shadowLift: Float
+    }
 
     struct Uniforms {
         var texelSize: SIMD2<Float>
@@ -339,9 +348,10 @@ final class BokehRenderer: @unchecked Sendable {
         guard let linearTex, let output = makeOutputFrame(w: w, h: h),
               let cmd = queue.makeCommandBuffer() else { return nil }
 
-        var help = SIMD4<Float>(settings.tint, max(settings.exposureGain, 1))
+        var help = LightUniforms(tintAndGain: SIMD4<Float>(settings.tint, max(settings.exposureGain, 1)),
+                                 shadowLift: min(max(settings.shadowLift, 0), 1))
         guard encode(cmd, nv12Pipeline, textures: [luma.texture, chroma.texture, linearTex],
-                     buffer: &help, bufferLength: MemoryLayout<SIMD4<Float>>.stride,
+                     buffer: &help, bufferLength: MemoryLayout<LightUniforms>.stride,
                      size: (w, h)) else { return nil }
 
         // Segmentation feeds TWO features, not just bokeh: it also tells the

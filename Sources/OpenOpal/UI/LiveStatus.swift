@@ -139,6 +139,10 @@ struct LiveStatus: View {
                    help: "The camera's white balance could go no further, so the app is removing the rest of the orange.")
             : Line("tint", "No colour shift")
 
+        let shadows = settings.shadowLift > 0.005
+            ? Line("shadows", String(format: "Shadows lifted %.0f%%", settings.shadowLift * 100), on: true)
+            : Line("shadows", "Shadows not lifted")
+
         let virtual: Line
         switch camera.installer.status {
         case .installed:
@@ -154,7 +158,7 @@ struct LiveStatus: View {
         case .unknown:       virtual = Line("virtual", "Virtual camera not installed")
         }
 
-        var lines = [blur, metering, brightness, white, colour, virtual]
+        var lines = [blur, metering, brightness, shadows, white, colour, virtual]
         if camera.device.usbIsSlow {
             lines.insert(Line("usb", "Slow USB 2 link, so fewer frames. Replug the cable or try another port.",
                               limit: true), at: 0)

@@ -197,6 +197,12 @@ private struct LightControls: View {
                      tone: .hint)
             }
 
+            OpalSlider("Lift shadows", value: $settings.shadowLift, range: 0...1,
+                       display: settings.shadowLift > 0
+                           ? String(format: "%.0f%%", settings.shadowLift * 100) : "off")
+            Note("Brightens the dark parts of the picture much more than the bright parts. Use it when a window or lamp lights one side of your face. The app does this, after the camera has set its exposure. More of it shows more grain.",
+                 tone: .hint)
+
             Choice("Anti-banding", selection: $settings.antiBanding,
                    options: CameraSettings.AntiBanding.allCases.map { ($0, $0.rawValue) })
                 .onChange(of: settings.antiBanding) { camera.push() }
