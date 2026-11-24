@@ -435,6 +435,12 @@ private struct VirtualCameraControls: View {
             }
         }
         switch camera.installer.status {
+        case .installed where camera.feeder.refused:
+            Note("The virtual camera is installed but will not take pictures from this app, because the two come from different builds. Other apps see the camera-off card. Install the latest Open Opal and open it again.",
+                 tone: .warning)
+        case .installed where camera.feeder.missing:
+            Note("The virtual camera is installed, but macOS did not start it after the last update. Restart your Mac to bring it back. Everything in this app still works.",
+                 tone: .warning)
         case .installed:
             HStack(spacing: 6) {
                 Circle().fill(camera.feeder.connected ? Opal.accent : Opal.faint).frame(width: 6, height: 6)

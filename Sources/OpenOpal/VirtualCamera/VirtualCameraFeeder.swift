@@ -22,6 +22,23 @@ final class VirtualCameraFeeder: @unchecked Sendable {
     private var isConnected = false
     var connected: Bool { lock.withLock { isConnected } }
 
+    /// True when the extension is running but would not take frames from this
+    /// app. It only trusts the exact app build it was signed with, so this is
+    /// what an app and an extension from different builds look like.
+    private var startRefused = false
+    var refused: Bool { lock.withLock { startRefused && !isConnected } }
+
+    /// True when the virtual camera has been absent for a while. With the
+    /// extension installed, that means macOS is not running it. Replacing an
+    /// extension can cause it: macOS stops the old one and submits the new one
+    /// a few milliseconds later under the same name, and if the old one has
+    /// not quite gone, launchd refuses ("Operation already in progress") and
+    /// nothing tries again. The app cannot start it. A Mac restart does.
+    private var missingSince: Date?
+    var missing: Bool {
+        lock.withLock { missingSince.map { Date().timeIntervalSince($0) > 10 } ?? false }
+    }
+
     /// The stream video apps read from, which carries the extension's "is
     /// anyone watching" property.
     private var sourceStreamID: CMIOStreamID?
@@ -76,7 +93,12 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !isConnected else { return }
 
-        guard let device = findDevice(uid: kVirtualDeviceUID) else { return }
+        guard let device = findDevice(uid: kVirtualDeviceUID) else {
+            if missingSince == nil { missingSince = Date() }
+            startRefused = false
+            return
+        }
+        missingSince = nil
         guard let sink = findStream(device: device, scope: kCMIODevicePropertyScopeOutput,
                                     direction: 0) else {
             log.warning("virtual device found but no sink stream")
@@ -93,6 +115,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         let ownedQueue = q.takeRetainedValue()
         guard CMIODeviceStartStream(device, sink) == noErr else {
             log.error("CMIODeviceStartStream failed")
+            startRefused = true
             return
         }
 
@@ -104,6 +127,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
         watchedCheckedAt = 0
         queue = ownedQueue
         isConnected = true
+        startRefused = false
         log.info("feeding virtual camera (device \(device), sink \(sink))")
     }
 
@@ -113,6 +137,7 @@ final class VirtualCameraFeeder: @unchecked Sendable {
             CMIODeviceStopStream(deviceID, sinkStreamID)
         }
         isConnected = false
+        startRefused = false
         queue = nil
         formatDesc = nil
     }

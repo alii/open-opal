@@ -57,6 +57,27 @@ python3 ./scripts/bundle-dependencies.py "$APP"
 echo "==> signing"
 ./scripts/sign.sh "$APP" >/dev/null
 
+# The extension only trusts the app whose Info.plist was sealed into it, and
+# macOS only replaces an installed extension when its version or build differs.
+# So changing the Info.plist without raising CFBundleVersion leaves an extension
+# that refuses the app, and other apps get the camera-off card.
+if [ -z "${CI:-}" ]; then
+  NEW="$APP/Contents/Library/SystemExtensions/sh.alistair.open-opal.camera.systemextension/Contents"
+  plist_version() {
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' "$1" | tr '\n' ' '
+  }
+  for OLD in /Library/SystemExtensions/*/sh.alistair.open-opal.camera.systemextension/Contents; do
+    [ -f "$OLD/Info.plist" ] || continue
+    if [ "$(plist_version "$OLD/Info.plist")" = "$(plist_version "$NEW/Info.plist")" ] &&
+       ! cmp -s "$OLD/Resources/OpenOpalHostInfo.plist" "$NEW/Resources/OpenOpalHostInfo.plist"; then
+      echo "error: the app's Info.plist changed but its build number did not." >&2
+      echo "Raise CFBundleVersion in project.yml (all three), or the installed" >&2
+      echo "camera extension will refuse this build." >&2
+      exit 1
+    fi
+  done
+fi
+
 echo "==> zipping for notarization"
 rm -f "$ZIP"
 # ditto (not zip) — it preserves the bundle's symlinks and extended attributes,
@@ -96,4 +117,4 @@ cp -R "$APP" /Applications/
 
 echo
 echo "done. Open Opal is notarized and installed."
-echo "Launch it, then: Advanced -> Virtual Camera -> Install virtual camera."
+echo "Launch it, float the panel, then: Camera -> Virtual camera -> Install."

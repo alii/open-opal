@@ -142,8 +142,12 @@ struct LiveStatus: View {
         let virtual: Line
         switch camera.installer.status {
         case .installed:
-            virtual = Line("virtual", camera.feeder.connected ? "Virtual camera live" : "Virtual camera starting",
-                           on: camera.feeder.connected)
+            virtual = camera.feeder.refused
+                ? Line("virtual", "Virtual camera refused this app", limit: true)
+                : camera.feeder.missing
+                ? Line("virtual", "Virtual camera not running. Restart your Mac.", limit: true)
+                : Line("virtual", camera.feeder.connected ? "Virtual camera live" : "Virtual camera starting",
+                       on: camera.feeder.connected)
         case .installing:    virtual = Line("virtual", "Virtual camera installing")
         case .needsApproval: virtual = Line("virtual", "Virtual camera needs approval", limit: true)
         case .failed:        virtual = Line("virtual", "Virtual camera failed", limit: true)
