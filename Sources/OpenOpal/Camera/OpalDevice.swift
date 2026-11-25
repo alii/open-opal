@@ -329,15 +329,17 @@ final class OpalDevice {
     /// `holdingFocus` keeps the lens where a click put it, whatever mode is
     /// chosen, by asking for one-shot autofocus.
     /// `whiteBalanceK` replaces auto white balance with that setting, without
-    /// touching what the user saved. See `LowLightAssist`.
-    func apply(_ s: CameraSettings, holdingFocus: Bool = false, whiteBalanceK: Int? = nil) {
+    /// touching what the user saved. See `LowLightAssist`. `exposureSteps` is
+    /// added to the user's exposure compensation. See `FaceExposure`.
+    func apply(_ s: CameraSettings, holdingFocus: Bool = false, whiteBalanceK: Int? = nil,
+               exposureSteps: Int = 0) {
         guard let handle else { return }
         var c = OpalControls()
 
         c.autoExposure   = s.autoExposure
         c.exposureUs     = Int32(s.exposureUs)
         c.iso            = Int32(s.iso)
-        c.evCompensation = Int32(s.evCompensation)
+        c.evCompensation = Int32(min(max(s.evCompensation + exposureSteps, -9), 9))
         c.aeLock         = s.aeLock
 
         c.manualFocus  = s.manualFocus
@@ -399,14 +401,12 @@ final class OpalDevice {
         }
     }
 
-    /// Meter auto-exposure on a region (leaves focus alone). Throttled and
-    /// dead-banded by the caller — spamming this would just flood the control
-    /// queue and make AE oscillate.
-    func meterExposure(on rect: CGRect) {
+    /// Meter the whole picture again, after a click pointed metering at a spot.
+    /// The camera keeps a region until it is given another: one left behind in
+    /// a dark corner was measured to make skin half as bright again.
+    func meterWholePicture() {
         guard let handle else { return }
-        opal_set_exposure_region(handle,
-                                 Float(rect.minX), Float(rect.minY),
-                                 Float(rect.width), Float(rect.height))
+        opal_set_exposure_region(handle, 0, 0, 1, 1)
     }
 
     /// Tap-to-focus: point the AF and AE metering at a spot in the frame.

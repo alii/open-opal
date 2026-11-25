@@ -77,31 +77,15 @@ final class CameraModel {
     private var nextSequence = 0
     private var presentedSequence = -1
 
-    /// Exposure history and tap holds are scoped to the capture pipeline.
-    private var meteringSession = SubjectMeteringSession()
     private var captureGeneration: UInt64 = 0
 
     private func resetCaptureTracking() {
         captureGeneration = gate.invalidate()
         latestFrame = nil
-        meteringSession.reset()
         assist = LowLightAssist()
+        faceExposure = FaceExposure()
         renderer?.resetCaptureState()
-        configureSubjectTracking()
         configureFrameDelivery()
-    }
-
-    private func configureSubjectTracking() {
-        guard let renderer else { return }
-        let generation = captureGeneration
-        renderer.onSubject = { [weak self, weak renderer] subject, analysisGeneration in
-            Task { @MainActor [weak self, weak renderer] in
-                guard let self, let renderer,
-                      self.captureGeneration == generation,
-                      renderer.isCurrentAnalysisGeneration(analysisGeneration) else { return }
-                self.meter(on: subject)
-            }
-        }
     }
 
     func start() async {
@@ -118,7 +102,6 @@ final class CameraModel {
                 r.matteProvider = MatteProvider(device: mtl)
             }
             renderer = r
-            configureSubjectTracking()
         }
 
         configureFrameDelivery()
@@ -167,6 +150,17 @@ final class CameraModel {
                     self.help(with: stats)
                 }
             }
+            if self.faceGate.tryBegin(every: 0.5) {
+                let sample = FrameBox(buffer: pixelBuffer)
+                Task.detached(priority: .utility) {
+                    let face = FaceLightSampler.sample(sample.buffer)
+                    await MainActor.run {
+                        self.faceGate.end()
+                        guard self.captureGeneration == generation, self.device.state.isLive else { return }
+                        self.expose(for: face)
+                    }
+                }
+            }
             guard self.gate.tryEnter(generation: generation) else {
                 self.stats.dropped()
                 return
@@ -183,6 +177,7 @@ final class CameraModel {
                     self.nextSequence += 1
                     var snapshot = RenderSettings(self.settings)
                     snapshot.exposureGain = Float(self.assist.gain)
+                    snapshot.shadowLift = Float(self.shadowLift)
                     snapshot.tint = SIMD3<Float>(self.assist.tint)
                     return (renderer, snapshot, seq)
                 }) else { return }
@@ -245,7 +240,8 @@ final class CameraModel {
     /// Send hot settings to the camera. Cheap — safe to call on every slider tick.
     /// The bridge coalesces and diffs, so nothing here blocks on USB.
     func push() {
-        device.apply(settings, holdingFocus: focusHeld, whiteBalanceK: assist.whiteBalanceK)
+        device.apply(settings, holdingFocus: focusHeld, whiteBalanceK: assist.whiteBalanceK,
+                     exposureSteps: faceExposure.offset)
     }
 
     /// Steps in when the camera's auto exposure or white balance is stuck.
@@ -253,6 +249,33 @@ final class CameraModel {
     private(set) var assist = LowLightAssist()
     private let assistClock = SampleClock()
     private var assistLoggedAt = Date.distantPast
+
+    /// The shadow lift in use. It backs off as the low light help adds
+    /// brightness, because by then the shadows are mostly noise.
+    var shadowLift: Double { settings.shadowLift / max(assist.gain, 1) }
+
+    /// Keeps a face well lit. Readable for the status area, like `assist`.
+    private(set) var faceExposure = FaceExposure()
+    private let faceGate = FaceSampleGate()
+
+    /// Whether the face exposure may act. A click on the picture aims exposure
+    /// itself, and in the dark the low light help owns brightness.
+    var facesExposure: Bool {
+        settings.exposeForFace && settings.autoExposure && !settings.aeLock && !focusHeld
+            && !(settings.lowLightHelp && assist.starved)
+    }
+
+    private func expose(for face: FaceLight?) {
+        let before = faceExposure.offset
+        if facesExposure {
+            faceExposure.update(face, userSteps: settings.evCompensation, at: Date())
+        } else {
+            faceExposure = FaceExposure()
+        }
+        guard faceExposure.offset != before else { return }
+        assistLog.info("face exposure \(before) to \(self.faceExposure.offset) steps, skin \(face?.mean ?? -1, format: .fixed(precision: 2)), brightest skin \(face?.bright ?? -1, format: .fixed(precision: 2))")
+        push()
+    }
 
     private func help(with stats: SceneStats) {
         let before = assist.whiteBalanceK
@@ -282,6 +305,7 @@ final class CameraModel {
 
     /// Give the lens back to whichever focus mode is chosen.
     func resumeAutofocus() {
+        if focusHeld { device.meterWholePicture() }
         focusHeld = false
         push()
     }
@@ -321,24 +345,13 @@ final class CameraModel {
         return DepthProvider(device: device)
     }
 
-    /// Click-to-focus. Also aims exposure at that spot, and stands the automatic
-    /// subject metering down for a few seconds — otherwise the next analysis pass
-    /// would immediately yank the exposure region back onto the person and the
-    /// click would appear to do nothing.
+    /// Click-to-focus. Also aims exposure at that spot, and stands the face
+    /// exposure down, until autofocus resumes.
     func focus(at sensorPoint: CGPoint) {
         device.focus(at: sensorPoint)
         // The device drops into one-shot AF so the focus holds. Remember that
         // here, so later pushes keep the hold and the panel can offer to end it.
         focusHeld = true
-        meteringSession.suspend(until: Date().addingTimeInterval(5))
-    }
-
-    /// Point auto-exposure at the person. Only fires when they've actually moved,
-    /// and only while AE is doing the deciding.
-    private func meter(on subject: SubjectInfo) {
-        guard settings.meterOnSubject, settings.autoExposure, device.state.isLive else { return }
-        guard let rect = meteringSession.region(for: subject.bounds, at: Date()) else { return }
-        device.meterExposure(on: rect)
     }
 
     /// Cold settings changed; reboot the pipeline to pick them up.

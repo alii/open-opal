@@ -20,7 +20,7 @@ struct CameraSettingsPersistenceTests {
         initial.outputMode = .hd720
         initial.fps = 40
         initial.mirrorPreview = false
-        initial.meterOnSubject = true
+        initial.exposeForFace = false
         precondition(initial.coldDirty)
 
         let restored = CameraSettings(preferences: preferences)
@@ -28,16 +28,16 @@ struct CameraSettingsPersistenceTests {
         precondition(restored.brightness == -3)
         precondition(!restored.autoExposure && restored.exposureUs == 12_000 && restored.iso == 800)
         precondition(restored.manualWhiteBalance && restored.whiteBalanceK == 4200)
-        precondition(restored.antiBanding == .hz50 && restored.meterOnSubject)
+        precondition(restored.antiBanding == .hz50 && !restored.exposeForFace)
         precondition(restored.outputMode == .hd720 && restored.fps == 40)
         precondition(!restored.mirrorPreview && !restored.coldDirty)
 
         restored.reset()
-        precondition(!restored.meterOnSubject && restored.antiBanding == .hz60)
+        precondition(restored.exposeForFace && restored.antiBanding == .auto)
         let reset = CameraSettings(preferences: preferences)
         precondition(!reset.manualFocus && reset.lensPosition == 120 && reset.brightness == 0)
         precondition(reset.autoExposure && reset.exposureUs == 8000)
-        precondition(!reset.meterOnSubject && reset.antiBanding == .hz60)
+        precondition(reset.exposeForFace && reset.antiBanding == .auto)
 
         // Blur-only changes must save immediately, without another camera
         // control change accidentally triggering the write for them.
@@ -61,9 +61,9 @@ struct CameraSettingsPersistenceTests {
         precondition(!CameraSettings(preferences: preferences).autoFocusSubject)
         blur.apertureShape = .hexagonal
         precondition(CameraSettings(preferences: preferences).apertureShape == .hexagonal)
-        blur.highlightBloom = 0.2
+        blur.shadowLift = 0.2
         let restoredBlur = CameraSettings(preferences: preferences)
-        precondition(restoredBlur.highlightBloom == 0.2 && restoredBlur.bokehEnabled)
+        precondition(restoredBlur.shadowLift == 0.2 && restoredBlur.bokehEnabled)
         precondition(abs(restoredBlur.blurAmount - 0.4) < 0.000001)
         precondition(!restoredBlur.syncBokeh && !restoredBlur.uniformBlur && restoredBlur.matteQuality == .fast)
         precondition(restoredBlur.focusDistance == 0.7 && !restoredBlur.autoFocusSubject)
@@ -82,17 +82,17 @@ struct CameraSettingsPersistenceTests {
         }
         let partial = restore(#"{"version":1,"brightness":4}"#)
         precondition(partial.brightness == 4 && partial.lensPosition == 120)
-        precondition(!partial.meterOnSubject)
+        precondition(partial.exposeForFace)
         precondition(!partial.bokehEnabled && partial.aperture == 2.8)
         precondition(partial.syncBokeh && partial.uniformBlur && partial.matteQuality == .accurate)
         precondition(partial.focusDistance == 0.35 && partial.autoFocusSubject)
-        precondition(partial.apertureShape == .circular && partial.highlightBloom == 0.55)
+        precondition(partial.apertureShape == .circular && partial.shadowLift == 0.5)
         let invalid = restore(#"{"version":1,"brightness":999,"lensPosition":-1,"fps":0,"iso":99999,"exposureUs":-1,"contrast":2}"#)
         precondition(invalid.brightness == 0 && invalid.lensPosition == 120 && invalid.fps == 30)
         precondition(invalid.iso == 400 && invalid.exposureUs == 8000 && invalid.contrast == 2)
-        let invalidBlur = restore(#"{"version":1,"bokehEnabled":true,"aperture":999,"focusDistance":-1,"highlightBloom":2,"brightness":4}"#)
+        let invalidBlur = restore(#"{"version":1,"bokehEnabled":true,"aperture":999,"focusDistance":-1,"shadowLift":2,"brightness":4}"#)
         precondition(invalidBlur.bokehEnabled && invalidBlur.brightness == 4)
-        precondition(invalidBlur.aperture == 2.8 && invalidBlur.focusDistance == 0.35 && invalidBlur.highlightBloom == 0.55)
+        precondition(invalidBlur.aperture == 2.8 && invalidBlur.focusDistance == 0.35 && invalidBlur.shadowLift == 0.5)
         for json in ["not JSON", #"{"version":1,"lensPosition":"wrong type"}"#,
                      #"{"version":1,"afMode":"unknown"}"#,
                      #"{"version":2,"brightness":4}"#] {

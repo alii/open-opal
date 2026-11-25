@@ -103,10 +103,13 @@ final class CameraSettings {
 
     /// Opt-in face metering. This runs person segmentation even with bokeh off,
     /// so leave it disabled until the user needs help with a backlit subject.
-    var meterOnSubject = false { didSet { save() } }
+    /// Move the camera's exposure compensation to light a face well.
+    var exposeForFace = true { didSet { save() } }
     /// Brighten the picture and fix a warm tint when the camera's own auto
     /// exposure and auto white balance have hit their limits.
     var lowLightHelp = true { didSet { save() } }
+    /// 0 to 1. How much the renderer brightens the dark parts of the picture.
+    var shadowLift: Double = 0.5 { didSet { save() } }
 
     /// Shutter expressed the way a photographer thinks about it.
     var shutterFraction: String {
@@ -313,8 +316,9 @@ final class CameraSettings {
         if let value = saved.iso, (100...1600).contains(value) { iso = value }
         if let value = saved.evCompensation, (-9...9).contains(value) { evCompensation = value }
         if let value = saved.aeLock { aeLock = value }
-        if let value = saved.meterOnSubject { meterOnSubject = value }
+        if let value = saved.exposeForFace { exposeForFace = value }
         if let value = saved.lowLightHelp { lowLightHelp = value }
+        if let value = saved.shadowLift, (0...1).contains(value) { shadowLift = value }
         if let value = saved.manualFocus { manualFocus = value }
         if let value = saved.lensPosition, (0...255).contains(value) { lensPosition = value }
         // One-shot AUTO is what click-to-focus and face tracking leave behind to
@@ -359,8 +363,9 @@ final class CameraSettings {
             iso: iso,
             evCompensation: evCompensation,
             aeLock: aeLock,
-            meterOnSubject: meterOnSubject,
+            exposeForFace: exposeForFace,
             lowLightHelp: lowLightHelp,
+            shadowLift: shadowLift,
             manualFocus: manualFocus,
             lensPosition: lensPosition,
             afMode: afMode,
@@ -406,8 +411,9 @@ final class CameraSettings {
         var iso: Int?
         var evCompensation: Int?
         var aeLock: Bool?
-        var meterOnSubject: Bool?
+        var exposeForFace: Bool?
         var lowLightHelp: Bool?
+        var shadowLift: Double?
         var manualFocus: Bool?
         var lensPosition: Int?
         var afMode: AFMode?
@@ -448,8 +454,9 @@ final class CameraSettings {
 
     func reset() {
         autoExposure = true; evCompensation = 0; aeLock = false
-        meterOnSubject = false
+        exposeForFace = true
         lowLightHelp = true
+        shadowLift = 0.5
         exposureUs = 8_000; iso = 400
         manualFocus = false; afMode = .continuousVideo; lensPosition = 120
         limitAfRange = false; afRangeInfinity = 90; afRangeMacro = 160

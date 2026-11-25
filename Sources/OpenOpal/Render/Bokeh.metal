@@ -61,10 +61,37 @@ inline float luminance(float3 c) {
 // conversion, no intermediate copy.
 // ---------------------------------------------------------------------------
 
+struct LightUniforms {
+    float4 tintAndGain;
+    float  shadowLift;   // 0..1
+};
+
+/// How bright the area around a pixel is, as encoded, ignoring anything across
+/// an edge. A dark cheek next to a bright window must be measured as dark: a
+/// plain blur would mix the two and leave a glowing outline between them.
+inline float localBrightness(texture2d<float, access::sample> luma, sampler s,
+                             float2 uv, float centre) {
+    constexpr float golden = 2.39996323;
+    float radius = 0.022 * float(luma.get_width());
+    float2 texel = 1.0 / float2(luma.get_width(), luma.get_height());
+    float sum = centre, weight = 1.0;
+    for (int i = 0; i < 24; ++i) {
+        float r = sqrt((float(i) + 0.5) / 24.0) * radius;
+        float a = float(i) * golden;
+        float v = saturate((luma.sample(s, uv + float2(cos(a), sin(a)) * r * texel).r
+                            - 16.0 / 255.0) * (255.0 / 219.0));
+        float d = (v - centre) / 0.12;
+        float w = exp(-0.5 * d * d);
+        sum += v * w;
+        weight += w;
+    }
+    return sum / weight;
+}
+
 kernel void nv12_to_linear(texture2d<float, access::sample> lumaTex   [[texture(0)]],
                            texture2d<float, access::sample> chromaTex [[texture(1)]],
                            texture2d<float, access::write>  out       [[texture(2)]],
-                           constant float4 &help [[buffer(0)]],
+                           constant LightUniforms &light [[buffer(0)]],
                            uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= out.get_width() || gid.y >= out.get_height()) return;
 
@@ -93,8 +120,28 @@ kernel void nv12_to_linear(texture2d<float, access::sample> lumaTex   [[texture(
     // sensor's noise floor, and multiplying it turned dark skin and hair
     // purple. Only the deepest shadows are left alone: a face in a dim room is
     // itself very dark, and with a wider fade it stayed red beside a white wall.
+    float4 help = light.tintAndGain;
     float  gain = help.a;
     float3 lin = srgbToLinear(saturate(rgb));
+
+    // Shadow lift. Black stays black and white stays white. The most is added
+    // about a fifth of the way up, where the unlit side of a face sits, and by
+    // halfway up there is little left, so the lit side is not washed out.
+    // The amount comes from the area, not the pixel, so skin keeps its texture.
+    // At most two stops: beyond that it is mostly lifting noise.
+    if (light.shadowLift > 0.0) {
+        float b = localBrightness(lumaTex, s, uv, saturate(y));
+        float d = 1.0 - b;
+        // Stronger than 2.1 turned skin pink and flat.
+        float lifted = b + 2.1 * light.shadowLift * b * d * d * d * d;
+        float ratio = srgbToLinear(float3(lifted)).x / max(srgbToLinear(float3(b)).x, 1e-4);
+        ratio = clamp(ratio, 1.0, 4.0);
+        lin *= ratio;
+        // Brightening a warm shadow makes its colour look stronger than it
+        // was, and skin turned orange. Take a little back.
+        float keep = 1.0 - 0.14 * saturate((ratio - 1.0) / 1.5);
+        lin = saturate(mix(float3(luminance(lin)), lin, keep));
+    }
     float3 flat = float3(luminance(help.rgb));
     lin *= mix(flat, help.rgb, smoothstep(0.0003, 0.003, luminance(lin)));
     lin = saturate(lin * gain / (1.0 + lin * (gain - 1.0)));

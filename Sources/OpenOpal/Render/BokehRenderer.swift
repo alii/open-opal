@@ -29,13 +29,14 @@ struct RenderSettings: Sendable {
     var bokehEnabled: Bool
     var syncBokeh: Bool
     var uniformBlur: Bool
-    var meterOnSubject: Bool
     var autoFocusSubject: Bool
     var focusDistance: Double
     var aperture: Double
     var hexIris: Bool
     /// Brightness to add, as a multiple of linear light. See `LowLightAssist`.
     var exposureGain: Float = 1
+    /// 0 to 1. How much to brighten the dark parts of the picture.
+    var shadowLift: Float
     /// What to multiply red, green and blue by, to take a colour cast out.
     var tint = SIMD3<Float>(repeating: 1)
 
@@ -44,11 +45,11 @@ struct RenderSettings: Sendable {
         bokehEnabled = s.bokehEnabled
         syncBokeh = s.syncBokeh
         uniformBlur = s.uniformBlur
-        meterOnSubject = s.meterOnSubject
         autoFocusSubject = s.autoFocusSubject
         focusDistance = s.focusDistance
         aperture = s.aperture
         hexIris = s.apertureShape == .hexagonal
+        shadowLift = Float(s.shadowLift)
     }
 }
 
@@ -109,6 +110,12 @@ final class BokehRenderer: @unchecked Sendable {
     /// Latest neural results, written by the analysis task and read by the
     /// render loop. Never blocks the render loop.
     private let analysis = AnalysisStore()
+
+    /// Matches `LightUniforms` in Bokeh.metal.
+    private struct LightUniforms {
+        var tintAndGain: SIMD4<Float>
+        var shadowLift: Float
+    }
 
     struct Uniforms {
         var texelSize: SIMD2<Float>
@@ -339,9 +346,10 @@ final class BokehRenderer: @unchecked Sendable {
         guard let linearTex, let output = makeOutputFrame(w: w, h: h),
               let cmd = queue.makeCommandBuffer() else { return nil }
 
-        var help = SIMD4<Float>(settings.tint, max(settings.exposureGain, 1))
+        var help = LightUniforms(tintAndGain: SIMD4<Float>(settings.tint, max(settings.exposureGain, 1)),
+                                 shadowLift: min(max(settings.shadowLift, 0), 1))
         guard encode(cmd, nv12Pipeline, textures: [luma.texture, chroma.texture, linearTex],
-                     buffer: &help, bufferLength: MemoryLayout<SIMD4<Float>>.stride,
+                     buffer: &help, bufferLength: MemoryLayout<LightUniforms>.stride,
                      size: (w, h)) else { return nil }
 
         // Segmentation feeds TWO features, not just bokeh: it also tells the
@@ -351,7 +359,7 @@ final class BokehRenderer: @unchecked Sendable {
         //
         // In sync mode the caller has already run analyzeNow() for this exact
         // frame, so there's nothing to kick off here.
-        if !syncing && (settings.bokehEnabled || settings.meterOnSubject) {
+        if !syncing && settings.bokehEnabled {
             kickOffAnalysisIfIdle(pixelBuffer: pixelBuffer,
                                   needsDepth: settings.bokehEnabled && !settings.uniformBlur)
         }
@@ -443,7 +451,6 @@ final class BokehRenderer: @unchecked Sendable {
     private func kickOffAnalysisIfIdle(pixelBuffer: CVPixelBuffer, needsDepth: Bool) {
         let box = BufferBox(buffer: pixelBuffer)
         let store = analysis
-        let onSubject = self.onSubject
 
         // --- segmentation: every frame. It's what tracks you. ---
         if let matteProvider, let generation = store.tryBeginMatte() {
@@ -455,10 +462,7 @@ final class BokehRenderer: @unchecked Sendable {
                         ? SubjectAnalysis.locate(matte: m)
                         : SubjectAnalysis.analyze(matte: m, depth: values,
                                                   depthWidth: dw, depthHeight: dh)
-                    if let subject = store.publishMatte(m, subject: subject, generation: generation),
-                       store.isCurrent(generation) {
-                        onSubject?(subject, generation)
-                    }
+                    _ = store.publishMatte(m, subject: subject, generation: generation)
                 }
             }
         }
@@ -486,15 +490,6 @@ final class BokehRenderer: @unchecked Sendable {
     /// What one depth map costs, in milliseconds. Zero until depth has run.
     var depthMs: Double { analysis.depthMs }
 
-    /// Fired whenever we get a fresh read on the subject. CameraModel uses it to
-    /// meter exposure on the person rather than the whole frame.
-    private let callbackLock = NSLock()
-    private var _onSubject: (@Sendable (SubjectInfo, UInt64) -> Void)?
-    var onSubject: (@Sendable (SubjectInfo, UInt64) -> Void)? {
-        get { callbackLock.withLock { _onSubject } }
-        set { callbackLock.withLock { _onSubject = newValue } }
-    }
-
     /// Compute the mask for THIS frame, and wait for it.
     ///
     /// Costs latency, buys exact alignment: the mask describes the frame we're
@@ -521,7 +516,6 @@ final class BokehRenderer: @unchecked Sendable {
         }
 
         let store = analysis
-        let onSubject = self.onSubject
         let stamp = store.nextMatteStamp()
         let own = MatteSlot()
 
@@ -542,11 +536,7 @@ final class BokehRenderer: @unchecked Sendable {
                         ? SubjectAnalysis.locate(matte: m)
                         : SubjectAnalysis.analyze(matte: m, depth: values,
                                                   depthWidth: dw, depthHeight: dh)
-                    if let subject = store.publishMatte(m, subject: subject,
-                                                        generation: generation, stamp: stamp),
-                       store.isCurrent(generation) {
-                        onSubject?(subject, generation)
-                    }
+                    _ = store.publishMatte(m, subject: subject, generation: generation, stamp: stamp)
                 }
                 once.resume()
             }
