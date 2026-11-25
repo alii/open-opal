@@ -104,6 +104,10 @@ Little of this is documented elsewhere, so for the record:
   getting it wrong pins every region into the top-left quadrant.
 - The 3A loops (autofocus, auto-exposure, auto-white-balance) run on the
   camera, not the host.
+- The front light is wired to Myriad X GPIOs: 37 is green, 34 is blue,
+  both active high. Stock firmware shows green while streaming, so the
+  pipeline holds GPIO 37 on. `tools/probes/led_probe.cpp` pulses each pin
+  in turn if more need finding; its log lags, so confirm hits one pin at a time.
 
 ## How it works
 

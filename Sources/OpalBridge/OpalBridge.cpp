@@ -404,6 +404,19 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
         xin->setStreamName("control");
         xin->out.link(cam->inputControl);
 
+        // Opal's firmware lit the front light green while streaming; DepthAI's
+        // firmware has no idea it exists. Hold it on for the pipeline's life.
+        // Closing reboots the camera to stock firmware, which turns it off.
+        auto light = pipeline.create<dai::node::Script>();
+        light->setScript(R"(
+import GPIO
+import time
+GPIO.setup(37, GPIO.OUT, GPIO.PULL_NONE)
+GPIO.write(37, 1)
+while True:
+    time.sleep(3600)
+)");
+
         { std::lock_guard<std::mutex> lk(g_logMutex); g_logT0 = std::chrono::steady_clock::now(); }
 
         // What we're about to send, with honest numbers.
