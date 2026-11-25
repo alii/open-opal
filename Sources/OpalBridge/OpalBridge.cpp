@@ -143,6 +143,10 @@ struct OpalDeviceHandle {
     bool          desiredValid = false;
     bool          lastSentValid = false;
 
+    // The front light, sent by the control thread only when it changes.
+    std::shared_ptr<dai::DataInputQueue> lightQ;
+    std::atomic<bool> lightWanted{false};
+
     OpalFrameCallback  cb = nullptr;
     void*              ctx = nullptr;
 
@@ -404,18 +408,21 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
         xin->setStreamName("control");
         xin->out.link(cam->inputControl);
 
-        // Opal's firmware lit the front light green while streaming; DepthAI's
-        // firmware has no idea it exists. Hold it on for the pipeline's life.
-        // Closing reboots the camera to stock firmware, which turns it off.
+        // Opal's firmware lit the front light green while a video app watched;
+        // DepthAI's firmware has no idea it exists. The host sends one byte on
+        // "light" (0 or 1) and the script sets GPIO 37 to match. Closing
+        // reboots the camera to stock firmware, which turns it off.
         auto light = pipeline.create<dai::node::Script>();
         light->setScript(R"(
 import GPIO
-import time
 GPIO.setup(37, GPIO.OUT, GPIO.PULL_NONE)
-GPIO.write(37, 1)
+GPIO.write(37, 0)
 while True:
-    time.sleep(3600)
+    GPIO.write(37, 1 if node.io['light'].get().getData()[0] else 0)
 )");
+        auto lightIn = pipeline.create<dai::node::XLinkIn>();
+        lightIn->setStreamName("light");
+        lightIn->out.link(light->inputs["light"]);
 
         { std::lock_guard<std::mutex> lk(g_logMutex); g_logT0 = std::chrono::steady_clock::now(); }
 
@@ -514,6 +521,7 @@ while True:
         h->device   = std::move(dev);
         h->videoQ   = h->device->getOutputQueue("video", 1, /*blocking=*/false);
         h->controlQ = h->device->getInputQueue("control");
+        h->lightQ   = h->device->getInputQueue("light");
         h->cb = cb;
         h->ctx = ctx;
         h->usbSpeed = static_cast<int>(h->device->getUsbSpeed());
@@ -535,7 +543,21 @@ while True:
 
         // Coalescing control thread: drains at most ~30Hz, sends only deltas.
         h->control = std::thread([h]() {
+            int lightSent = -1;
             while(h->running) {
+                const int light = h->lightWanted ? 1 : 0;
+                if(light != lightSent) {
+                    auto msg = std::make_shared<dai::Buffer>();
+                    msg->setData(std::vector<std::uint8_t>{static_cast<std::uint8_t>(light)});
+                    try {
+                        h->lightQ->send(msg);
+                    } catch(const std::exception& e) {
+                        setError(e.what());
+                        break;
+                    }
+                    lightSent = light;
+                }
+
                 OpalControls want{}, prev{};
                 bool haveWant = false, havePrev = false;
                 {
@@ -663,6 +685,11 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c) {
     std::lock_guard<std::mutex> lk(h->ctrlMutex);
     h->desired = c;
     h->desiredValid = true;
+}
+
+void opal_set_light(OpalDeviceHandle* h, bool on) {
+    if(!h) return;
+    h->lightWanted = on;
 }
 
 // The lens range sent with a mode or a limit change. Unlimited means 0..255,

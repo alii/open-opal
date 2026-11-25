@@ -136,6 +136,14 @@ final class CameraModel {
                     try? await Task.sleep(for: .seconds(3))
                 }
             }
+            // Light the camera only while a video app reads the virtual camera,
+            // as Opal's firmware did, not whenever OpenOpal holds it open.
+            Task { [device, feeder] in
+                while true {
+                    device.setLight(feeder.wantsFrames)
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+            }
         }
 
         await device.connect(settings: settings)

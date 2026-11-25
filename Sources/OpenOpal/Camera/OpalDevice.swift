@@ -389,6 +389,12 @@ final class OpalDevice {
         opal_trigger_autofocus(handle)
     }
 
+    /// The camera's green light. Cheap to call often: the bridge sends only a change.
+    func setLight(_ on: Bool) {
+        guard let handle else { return }
+        opal_set_light(handle, on)
+    }
+
     /// Meter auto-exposure on a region (leaves focus alone). Throttled and
     /// dead-banded by the caller — spamming this would just flood the control
     /// queue and make AE oscillate.
