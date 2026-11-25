@@ -389,10 +389,14 @@ final class OpalDevice {
         opal_trigger_autofocus(handle)
     }
 
-    /// The camera's green light. Cheap to call often: the bridge sends only a change.
-    func setLight(_ on: Bool) {
+    /// The camera's front light. Cheap to call often: the bridge sends only a change.
+    func setLight(_ light: CameraSettings.StatusLight) {
         guard let handle else { return }
-        opal_set_light(handle, on)
+        switch light {
+        case .off:   opal_set_light(handle, OPAL_LIGHT_OFF)
+        case .green: opal_set_light(handle, OPAL_LIGHT_GREEN)
+        case .blue:  opal_set_light(handle, OPAL_LIGHT_BLUE)
+        }
     }
 
     /// Meter auto-exposure on a region (leaves focus alone). Throttled and

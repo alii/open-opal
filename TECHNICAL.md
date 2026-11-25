@@ -106,7 +106,8 @@ Little of this is documented elsewhere, so for the record:
   camera, not the host.
 - The front light is wired to Myriad X GPIOs: 37 is green, 34 is blue,
   both active high. Stock firmware shows green while a video app has the
-  camera, so the app turns GPIO 37 on while one reads the virtual camera.
+  camera. **Status light** (off by default) turns the chosen color on while
+  one reads the virtual camera.
   `tools/probes/led_probe.cpp` pulses each pin in turn if more need finding;
   its log lags, so confirm hits one pin at a time.
 

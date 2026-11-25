@@ -171,8 +171,9 @@ void opal_close(OpalDeviceHandle* h);
 
 // --- runtime ---------------------------------------------------------------
 void opal_set_controls(OpalDeviceHandle* h, OpalControls c);
-// The camera's green front light. Non-blocking: the control thread sends it.
-void opal_set_light(OpalDeviceHandle* h, bool on);
+// The camera's front light. Non-blocking: the control thread sends it.
+typedef enum { OPAL_LIGHT_OFF = 0, OPAL_LIGHT_GREEN = 1, OPAL_LIGHT_BLUE = 2 } OpalLight;
+void opal_set_light(OpalDeviceHandle* h, OpalLight light);
 void opal_trigger_autofocus(OpalDeviceHandle* h);
 // Normalized [0,1] rect within the frame; drives AE + AF metering region.
 void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float h_);

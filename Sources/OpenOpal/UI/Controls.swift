@@ -410,6 +410,11 @@ private struct CameraControls: View {
             Note("A virtual camera makes Open Opal's finished picture, blur included, show up as a camera called “Open Opal Camera” in Zoom, Meet, FaceTime and other apps.",
                  tone: .hint)
             VirtualCameraControls()
+
+            Sub("Status light")
+            Choice("Light", selection: $settings.statusLight,
+                   options: CameraSettings.StatusLight.allCases.map { ($0, $0.rawValue) })
+            Note("Lights the front of the camera while a video app is using it.", tone: .hint)
         }
     }
 }

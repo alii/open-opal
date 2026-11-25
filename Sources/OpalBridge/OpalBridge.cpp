@@ -145,7 +145,7 @@ struct OpalDeviceHandle {
 
     // The front light, sent by the control thread only when it changes.
     std::shared_ptr<dai::DataInputQueue> lightQ;
-    std::atomic<bool> lightWanted{false};
+    std::atomic<int> lightWanted{OPAL_LIGHT_OFF};
 
     OpalFrameCallback  cb = nullptr;
     void*              ctx = nullptr;
@@ -408,17 +408,21 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
         xin->setStreamName("control");
         xin->out.link(cam->inputControl);
 
-        // Opal's firmware lit the front light green while a video app watched;
+        // Opal's firmware lit the front light while a video app watched;
         // DepthAI's firmware has no idea it exists. The host sends one byte on
-        // "light" (0 or 1) and the script sets GPIO 37 to match. Closing
-        // reboots the camera to stock firmware, which turns it off.
+        // "light" (an OpalLight) and the script sets GPIO 37 (green) or 34
+        // (blue) to match. Closing reboots the camera to stock firmware.
         auto light = pipeline.create<dai::node::Script>();
         light->setScript(R"(
 import GPIO
-GPIO.setup(37, GPIO.OUT, GPIO.PULL_NONE)
-GPIO.write(37, 0)
+PINS = {1: 37, 2: 34}
+for pin in PINS.values():
+    GPIO.setup(pin, GPIO.OUT, GPIO.PULL_NONE)
+    GPIO.write(pin, 0)
 while True:
-    GPIO.write(37, 1 if node.io['light'].get().getData()[0] else 0)
+    want = node.io['light'].get().getData()[0]
+    for color, pin in PINS.items():
+        GPIO.write(pin, 1 if color == want else 0)
 )");
         auto lightIn = pipeline.create<dai::node::XLinkIn>();
         lightIn->setStreamName("light");
@@ -545,7 +549,7 @@ while True:
         h->control = std::thread([h]() {
             int lightSent = -1;
             while(h->running) {
-                const int light = h->lightWanted ? 1 : 0;
+                const int light = h->lightWanted;
                 if(light != lightSent) {
                     auto msg = std::make_shared<dai::Buffer>();
                     msg->setData(std::vector<std::uint8_t>{static_cast<std::uint8_t>(light)});
@@ -687,9 +691,9 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c) {
     h->desiredValid = true;
 }
 
-void opal_set_light(OpalDeviceHandle* h, bool on) {
+void opal_set_light(OpalDeviceHandle* h, OpalLight light) {
     if(!h) return;
-    h->lightWanted = on;
+    h->lightWanted = light;
 }
 
 // The lens range sent with a mode or a limit change. Unlimited means 0..255,

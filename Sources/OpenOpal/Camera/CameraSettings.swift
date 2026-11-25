@@ -279,6 +279,18 @@ final class CameraSettings {
         var id: String { rawValue }
     }
 
+    // MARK: - Status light
+
+    /// The C1's front light while a video app uses the camera. Off by default.
+    var statusLight: StatusLight = .off { didSet { save() } }
+
+    enum StatusLight: String, Codable, CaseIterable, Identifiable {
+        case off   = "Off"
+        case green = "Green"
+        case blue  = "Blue"
+        var id: String { rawValue }
+    }
+
     // MARK: - Saved camera controls
 
     static let persistenceKey = "cameraSettings.v1"
@@ -332,6 +344,7 @@ final class CameraSettings {
         if let value = saved.focusDistance, (0...1).contains(value) { focusDistance = value }
         if let value = saved.autoFocusSubject { autoFocusSubject = value }
         if let value = saved.apertureShape { apertureShape = value }
+        if let value = saved.statusLight { statusLight = value }
     }
 
     private func save() {
@@ -373,7 +386,8 @@ final class CameraSettings {
             aperture: aperture,
             focusDistance: focusDistance,
             autoFocusSubject: autoFocusSubject,
-            apertureShape: apertureShape
+            apertureShape: apertureShape,
+            statusLight: statusLight
         )
         if let data = try? JSONEncoder().encode(saved) {
             preferences.set(data, forKey: Self.persistenceKey)
@@ -420,6 +434,7 @@ final class CameraSettings {
         var focusDistance: Double?
         var autoFocusSubject: Bool?
         var apertureShape: ApertureShape?
+        var statusLight: StatusLight?
     }
 
     // MARK: - Presets
