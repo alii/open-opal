@@ -418,8 +418,15 @@ private struct CameraControls: View {
             VirtualCameraControls()
 
             Sub("Status light")
-            Choice("Light", selection: $settings.statusLight,
-                   options: CameraSettings.StatusLight.allCases.map { ($0, $0.rawValue) })
+            HStack {
+                Text("Light").foregroundStyle(Opal.dim)
+                Spacer()
+                Picker("Light", selection: $settings.statusLight) {
+                    ForEach(CameraSettings.StatusLight.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
             Note("Lights the front of the camera while a video app is using it.", tone: .hint)
         }
     }

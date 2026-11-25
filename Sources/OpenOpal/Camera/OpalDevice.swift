@@ -394,11 +394,17 @@ final class OpalDevice {
     /// The camera's front light. Cheap to call often: the bridge sends only a change.
     func setLight(_ light: CameraSettings.StatusLight) {
         guard let handle else { return }
-        switch light {
-        case .off:   opal_set_light(handle, OPAL_LIGHT_OFF)
-        case .green: opal_set_light(handle, OPAL_LIGHT_GREEN)
-        case .blue:  opal_set_light(handle, OPAL_LIGHT_BLUE)
+        let colors: Int32 = switch light {
+        case .off:     0
+        case .white:   OPAL_LIGHT_RED | OPAL_LIGHT_GREEN | OPAL_LIGHT_BLUE
+        case .red:     OPAL_LIGHT_RED
+        case .green:   OPAL_LIGHT_GREEN
+        case .blue:    OPAL_LIGHT_BLUE
+        case .yellow:  OPAL_LIGHT_RED | OPAL_LIGHT_GREEN
+        case .cyan:    OPAL_LIGHT_GREEN | OPAL_LIGHT_BLUE
+        case .magenta: OPAL_LIGHT_RED | OPAL_LIGHT_BLUE
         }
+        opal_set_light(handle, UInt8(colors))
     }
 
     /// Meter the whole picture again, after a click pointed metering at a spot.

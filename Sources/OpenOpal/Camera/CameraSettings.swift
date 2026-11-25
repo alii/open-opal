@@ -288,9 +288,14 @@ final class CameraSettings {
     var statusLight: StatusLight = .off { didSet { save() } }
 
     enum StatusLight: String, Codable, CaseIterable, Identifiable {
-        case off   = "Off"
-        case green = "Green"
-        case blue  = "Blue"
+        case off     = "Off"
+        case white   = "White"
+        case red     = "Red"
+        case green   = "Green"
+        case blue    = "Blue"
+        case yellow  = "Yellow"
+        case cyan    = "Cyan"
+        case magenta = "Magenta"
         var id: String { rawValue }
     }
 

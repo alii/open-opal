@@ -145,7 +145,7 @@ struct OpalDeviceHandle {
 
     // The front light, sent by the control thread only when it changes.
     std::shared_ptr<dai::DataInputQueue> lightQ;
-    std::atomic<int> lightWanted{OPAL_LIGHT_OFF};
+    std::atomic<int> lightWanted{0};
 
     OpalFrameCallback  cb = nullptr;
     void*              ctx = nullptr;
@@ -410,19 +410,20 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
 
         // Opal's firmware lit the front light while a video app watched;
         // DepthAI's firmware has no idea it exists. The host sends one byte on
-        // "light" (an OpalLight) and the script sets GPIO 37 (green) or 34
-        // (blue) to match. Closing reboots the camera to stock firmware.
+        // "light" (OPAL_LIGHT_* bits) and the script sets the RGB pins to match.
+        // Pins from Opal Composer's own LED script. Closing reboots the camera
+        // to stock firmware.
         auto light = pipeline.create<dai::node::Script>();
         light->setScript(R"(
 import GPIO
-PINS = {1: 37, 2: 34}
-for pin in PINS.values():
+PINS = ((1, 58), (2, 37), (4, 34))  # red, green, blue
+for _, pin in PINS:
     GPIO.setup(pin, GPIO.OUT, GPIO.PULL_NONE)
     GPIO.write(pin, 0)
 while True:
-    want = node.io['light'].get().getData()[0]
-    for color, pin in PINS.items():
-        GPIO.write(pin, 1 if color == want else 0)
+    colors = node.io['light'].get().getData()[0]
+    for bit, pin in PINS:
+        GPIO.write(pin, 1 if colors & bit else 0)
 )");
         auto lightIn = pipeline.create<dai::node::XLinkIn>();
         lightIn->setStreamName("light");
@@ -691,9 +692,9 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c) {
     h->desiredValid = true;
 }
 
-void opal_set_light(OpalDeviceHandle* h, OpalLight light) {
+void opal_set_light(OpalDeviceHandle* h, uint8_t colors) {
     if(!h) return;
-    h->lightWanted = light;
+    h->lightWanted = colors;
 }
 
 // The lens range sent with a mode or a limit change. Unlimited means 0..255,
