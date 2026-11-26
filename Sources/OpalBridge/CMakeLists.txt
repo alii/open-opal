@@ -54,6 +54,16 @@ if(OPAL_BRIDGE_TEST)
         INSTALL_RPATH "@executable_path;${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib"
         BUILD_WITH_INSTALL_RPATH TRUE)
 
+    # Pulses GPIOs one at a time to find the front light. Compiles the bridge
+    # source directly to reuse its first-generation boot walk.
+    add_executable(led_probe ${CMAKE_CURRENT_LIST_DIR}/../../tools/probes/led_probe.cpp)
+    target_include_directories(led_probe PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib/cmake/depthai/dependencies/include")
+    target_link_libraries(led_probe PRIVATE depthai::core "${OPAL_LIBUSB}")
+    set_target_properties(led_probe PROPERTIES
+        INSTALL_RPATH "${CMAKE_CURRENT_LIST_DIR}/../../vendor/install/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE)
+
     # Offline regressions: serialize real commands without opening hardware.
     enable_testing()
     add_executable(control_delta_test test/control_delta_test.cpp)

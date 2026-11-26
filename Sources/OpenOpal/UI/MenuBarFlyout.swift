@@ -57,11 +57,12 @@ struct MenuBarFlyout: View {
             HStack(spacing: 10) {
                 Rectangle().fill(Opal.accent).frame(width: 7, height: 7)
                 Caps("Open Opal", color: Opal.text)
-                Text(controller.snapReady
-                     ? "Release to dock"
-                     : controller.isFloating ? "Drag to move or dock" : "Drag to float")
-                    .font(Opal.note)
-                    .foregroundStyle(controller.snapReady ? Opal.accent : Opal.faint)
+                // Only while dragging: the header has no room for a standing hint.
+                if controller.snapReady {
+                    Text("Release to dock")
+                        .font(Opal.note)
+                        .foregroundStyle(Opal.accent)
+                }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, minHeight: 28)
@@ -69,16 +70,6 @@ struct MenuBarFlyout: View {
             .overlay { PanelDragHandle(controller: controller) }
 
             actions
-
-            Button {
-                if controller.isFloating { controller.dock() } else { controller.detach() }
-            } label: {
-                Label(controller.isFloating ? "Dock" : "Float",
-                      systemImage: controller.isFloating
-                        ? "menubar.dock.rectangle" : "arrow.up.left.and.arrow.down.right")
-            }
-            .buttonStyle(.quiet)
-            .help(controller.isFloating ? "Dock to the menu bar" : "Float: all settings and a bigger picture")
 
             Button {
                 controller.hide()
@@ -96,6 +87,12 @@ struct MenuBarFlyout: View {
     /// Everything that acts on the whole app or the whole camera, in one place.
     private var actions: some View {
         Menu {
+            if controller.isFloating {
+                Button("Dock to Menu Bar") { controller.dock() }
+            } else {
+                Button("All Settings…") { controller.detach() }
+            }
+            Divider()
             Button("Focus Now") { camera.device.triggerAutofocus() }
                 .disabled(!camera.device.state.isLive)
             Button(camera.previewFrozen ? "Unfreeze Preview" : "Freeze Preview") {
@@ -122,7 +119,7 @@ struct MenuBarFlyout: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Focus now, freeze the preview, reconnect, reset, quit")
+        .help("All settings, focus now, freeze the preview, reconnect, reset, quit")
         .accessibilityLabel("More actions")
     }
 
