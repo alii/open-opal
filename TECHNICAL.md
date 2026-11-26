@@ -108,8 +108,12 @@ Little of this is documented elsewhere, so for the record:
   red, 37 is green, 34 is blue (Opal Composer's own LED script uses the
   same pins). All three make the stock white. **Status light** (off by
   default) turns the chosen color on while a video app reads the virtual
-  camera. `tools/probes/led_probe.cpp` pulses pins one at a time; its log
-  lags, so confirm hits one pin at a time.
+  camera, and **Startup animation** (on by default) plays a quick rainbow on
+  connect. A camera script switches a pin in about 25 µs and the Mac can
+  send it a message about every 0.7 ms, so animations, including software
+  dimming, run on the camera, not from the app.
+  `tools/probes/led_probe.cpp` pulses pins one at a time; its log lags, so
+  confirm hits one pin at a time.
 
 ## How it works
 

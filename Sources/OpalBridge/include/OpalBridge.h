@@ -177,6 +177,14 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c);
 #define OPAL_LIGHT_GREEN 2
 #define OPAL_LIGHT_BLUE  4
 void opal_set_light(OpalDeviceHandle* h, uint8_t colors);
+// Play an animation on the camera, then show the current color again.
+#define OPAL_LIGHT_ANIM_RAINBOW   0  // fast rainbow, two white blinks, fade out
+#define OPAL_LIGHT_ANIM_ERROR     1  // red, three times
+#define OPAL_LIGHT_ANIM_SOS       2  // white, in Morse code
+#define OPAL_LIGHT_ANIM_BREATHE   3  // the current color (or white) fades in and out
+#define OPAL_LIGHT_ANIM_SMOOTH    4  // a color wheel crossfading through each hue
+#define OPAL_LIGHT_ANIM_HEARTBEAT 5  // two soft white pulses
+void opal_play_light_animation(OpalDeviceHandle* h, uint8_t animation);
 void opal_trigger_autofocus(OpalDeviceHandle* h);
 // Normalized [0,1] rect within the frame; drives AE + AF metering region.
 void opal_set_focus_region(OpalDeviceHandle* h, float x, float y, float w, float h_);

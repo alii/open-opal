@@ -428,7 +428,37 @@ private struct CameraControls: View {
                 .fixedSize()
             }
             Note("Lights the front of the camera while a video app is using it.", tone: .hint)
+            Toggle("Startup animation", isOn: $settings.lightStartupAnimation)
+            Note("Plays a quick rainbow when the camera connects.", tone: .hint)
+
+            LightTestControls()
         }
+    }
+}
+
+/// Temporary buttons for trying the status light by hand. Remove once the
+/// colors and the startup animation are settled.
+private struct LightTestControls: View {
+    @Environment(CameraModel.self) private var camera
+
+    var body: some View {
+        Sub("Light test (temporary)")
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
+            ForEach(CameraSettings.StatusLight.allCases) { light in
+                Button(light.rawValue) { camera.lightOverride = light }
+            }
+        }
+        .buttonStyle(.quiet)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
+            ForEach(OpalDevice.LightAnimation.allCases) { animation in
+                Button(animation.rawValue) { camera.device.playLightAnimation(animation) }
+            }
+        }
+        .buttonStyle(.quiet)
+        Button("Back to setting") { camera.lightOverride = nil }
+            .buttonStyle(.quiet)
+        Note(camera.lightOverride.map { "Showing \($0.rawValue) no matter what." }
+             ?? "Following the setting above.", tone: .hint)
     }
 }
 

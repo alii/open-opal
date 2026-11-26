@@ -115,6 +115,11 @@ dai::CameraControl::AutoFocusMode mapAf(OpalAfMode m) {
 
 // ---------------------------------------------------------------------------
 
+// Sent on the "light" stream with an OPAL_LIGHT_ANIM_* in the low bits to play
+// an animation. Matches the 0x80 check in the light script, and sits above the
+// OPAL_LIGHT_* color bits.
+static constexpr int kLightAnimate = 0x80;
+
 struct OpalDeviceHandle {
     std::unique_ptr<dai::Device>       device;
     std::shared_ptr<dai::DataInputQueue> controlQ;
@@ -146,6 +151,7 @@ struct OpalDeviceHandle {
     // The front light, sent by the control thread only when it changes.
     std::shared_ptr<dai::DataInputQueue> lightQ;
     std::atomic<int> lightWanted{0};
+    std::atomic<int> lightAnimate{-1};
 
     OpalFrameCallback  cb = nullptr;
     void*              ctx = nullptr;
@@ -410,20 +416,101 @@ OpalDeviceHandle* opal_open(const char* mxid, OpalPipelineConfig cfg,
 
         // Opal's firmware lit the front light while a video app watched;
         // DepthAI's firmware has no idea it exists. The host sends one byte on
-        // "light" (OPAL_LIGHT_* bits) and the script sets the RGB pins to match.
-        // Pins from Opal Composer's own LED script. Closing reboots the camera
-        // to stock firmware.
+        // "light": OPAL_LIGHT_* bits to show, or kLightAnimate plus an
+        // animation to play on the camera before showing the last color again.
+        // A pin switches in about 25 us here, far faster than the host could
+        // drive it. Pins from Opal Composer's own LED script. Closing reboots
+        // the camera to stock firmware.
         auto light = pipeline.create<dai::node::Script>();
         light->setScript(R"(
 import GPIO
+import time
 PINS = ((1, 58), (2, 37), (4, 34))  # red, green, blue
-for _, pin in PINS:
-    GPIO.setup(pin, GPIO.OUT, GPIO.PULL_NONE)
-    GPIO.write(pin, 0)
-while True:
-    colors = node.io['light'].get().getData()[0]
+RED, WHITE = 1, 7
+RAINBOW = (1, 3, 2, 6, 4, 5)  # red, yellow, green, cyan, blue, magenta
+# The same wheel as red, green, blue levels for crossfading.
+WHEEL = ((16, 0, 0), (16, 16, 0), (0, 16, 0), (0, 16, 16), (0, 0, 16), (16, 0, 16), (16, 0, 0))
+
+def show(colors):
     for bit, pin in PINS:
         GPIO.write(pin, 1 if colors & bit else 0)
+
+def hold(colors, seconds):
+    show(colors)
+    time.sleep(seconds)
+
+# Dimming in software: each channel is on for `level` of 16 steps, and 16 steps
+# of three ~25 us writes make a ~1 ms period, far too fast to see flicker.
+# Levels run 0 (off) to 16 (full).
+def mix(r, g, b, periods):
+    for _ in range(periods):
+        for step in range(16):
+            GPIO.write(58, 1 if step < r else 0)
+            GPIO.write(37, 1 if step < g else 0)
+            GPIO.write(34, 1 if step < b else 0)
+
+def fade(colors, start, stop, periods):
+    step = 1 if stop > start else -1
+    for level in range(start, stop + step, step):
+        mix(*[level if colors & bit else 0 for bit in (1, 2, 4)], periods)
+
+def blend(a, b, periods):
+    for i in range(17):
+        mix(*[x + (y - x) * i // 16 for x, y in zip(a, b)], periods)
+
+def rainbow(_):
+    for _ in range(3):
+        for colors in RAINBOW:
+            hold(colors, 0.035)
+    for _ in range(2):
+        hold(WHITE, 0.05)
+        hold(0, 0.05)
+    fade(WHITE, 16, 0, 8)
+
+def error(_):
+    for _ in range(3):
+        hold(RED, 0.15)
+        hold(0, 0.15)
+
+def sos(_):
+    for letter in ('...', '---', '...'):
+        for mark in letter:
+            hold(WHITE, 0.1 if mark == '.' else 0.3)
+            hold(0, 0.1)
+        time.sleep(0.2)
+
+def breathe(colors):
+    for _ in range(2):
+        fade(colors or WHITE, 0, 16, 30)
+        fade(colors or WHITE, 16, 0, 30)
+
+def smooth(_):
+    fade(RED, 0, 16, 3)
+    for a, b in zip(WHEEL, WHEEL[1:]):
+        blend(a, b, 5)
+    fade(RED, 16, 0, 4)
+
+def heartbeat(_):
+    for _ in range(2):
+        fade(WHITE, 0, 16, 1)
+        fade(WHITE, 16, 0, 5)
+        time.sleep(0.12)
+
+# Indexed by OPAL_LIGHT_ANIM_*.
+ANIMATIONS = (rainbow, error, sos, breathe, smooth, heartbeat)
+for _, pin in PINS:
+    GPIO.setup(pin, GPIO.OUT, GPIO.PULL_NONE)
+show(0)
+current = 0
+while True:
+    msg = node.io['light'].get().getData()[0]
+    if msg & 0x80:
+        animation = msg & 0x7f
+        if animation < len(ANIMATIONS):
+            ANIMATIONS[animation](current)
+    else:
+        current = msg
+    show(current)
 )");
         auto lightIn = pipeline.create<dai::node::XLinkIn>();
         lightIn->setStreamName("light");
@@ -548,20 +635,23 @@ while True:
 
         // Coalescing control thread: drains at most ~30Hz, sends only deltas.
         h->control = std::thread([h]() {
+            auto sendLight = [h](int value) {
+                auto msg = std::make_shared<dai::Buffer>();
+                msg->setData(std::vector<std::uint8_t>{static_cast<std::uint8_t>(value)});
+                h->lightQ->send(msg);
+            };
             int lightSent = -1;
             while(h->running) {
                 const int light = h->lightWanted;
-                if(light != lightSent) {
-                    auto msg = std::make_shared<dai::Buffer>();
-                    msg->setData(std::vector<std::uint8_t>{static_cast<std::uint8_t>(light)});
-                    try {
-                        h->lightQ->send(msg);
-                    } catch(const std::exception& e) {
-                        setError(e.what());
-                        break;
-                    }
-                    lightSent = light;
+                const int animation = h->lightAnimate.exchange(-1);
+                try {
+                    if(light != lightSent) sendLight(light);
+                    if(animation >= 0) sendLight(kLightAnimate | animation);
+                } catch(const std::exception& e) {
+                    setError(e.what());
+                    break;
                 }
+                lightSent = light;
 
                 OpalControls want{}, prev{};
                 bool haveWant = false, havePrev = false;
@@ -695,6 +785,11 @@ void opal_set_controls(OpalDeviceHandle* h, OpalControls c) {
 void opal_set_light(OpalDeviceHandle* h, uint8_t colors) {
     if(!h) return;
     h->lightWanted = colors;
+}
+
+void opal_play_light_animation(OpalDeviceHandle* h, uint8_t animation) {
+    if(!h) return;
+    h->lightAnimate = animation;
 }
 
 // The lens range sent with a mode or a limit change. Unlimited means 0..255,

@@ -215,6 +215,7 @@ final class OpalDevice {
         sink.stampFrame()
         state = .streaming
         apply(settings)
+        if settings.lightStartupAnimation { playLightAnimation(.rainbow) }
         startTelemetry()
         // Dimensions come from the first delivered frame, which has not arrived
         // yet at this point, so claiming "0x0" here is just wrong. The renderer
@@ -405,6 +406,29 @@ final class OpalDevice {
         case .magenta: OPAL_LIGHT_RED | OPAL_LIGHT_BLUE
         }
         opal_set_light(handle, UInt8(colors))
+    }
+
+    enum LightAnimation: String, CaseIterable, Identifiable {
+        case rainbow   = "Rainbow"
+        case smooth    = "Smooth"
+        case heartbeat = "Heartbeat"
+        case breathe   = "Breathe"
+        case error     = "Error ×3"
+        case sos       = "SOS"
+        var id: String { rawValue }
+    }
+
+    func playLightAnimation(_ animation: LightAnimation) {
+        guard let handle else { return }
+        let code: Int32 = switch animation {
+        case .rainbow:   OPAL_LIGHT_ANIM_RAINBOW
+        case .smooth:    OPAL_LIGHT_ANIM_SMOOTH
+        case .heartbeat: OPAL_LIGHT_ANIM_HEARTBEAT
+        case .breathe:   OPAL_LIGHT_ANIM_BREATHE
+        case .error:     OPAL_LIGHT_ANIM_ERROR
+        case .sos:       OPAL_LIGHT_ANIM_SOS
+        }
+        opal_play_light_animation(handle, UInt8(code))
     }
 
     /// Meter the whole picture again, after a click pointed metering at a spot.

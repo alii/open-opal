@@ -25,6 +25,17 @@ final class CameraModel {
     private var feederPollStarted = false
     private var isStarting = false
 
+    /// Temporary: a color forced by the light test buttons, ignoring the
+    /// setting and whether a video app is watching. Nil follows the setting.
+    var lightOverride: CameraSettings.StatusLight? { didSet { updateLight() } }
+
+    /// Light the camera in the chosen color only while a video app reads the
+    /// virtual camera, as Opal's firmware did.
+    private func updateLight() {
+        let light = settings.statusLight
+        device.setLight(lightOverride ?? (light != .off && feeder.wantsFrames ? light : .off))
+    }
+
     init() {
         device.onDisconnect = { [weak self] in
             self?.resetCaptureTracking()
@@ -119,12 +130,9 @@ final class CameraModel {
                     try? await Task.sleep(for: .seconds(3))
                 }
             }
-            // Light the camera in the chosen color only while a video app reads
-            // the virtual camera, as Opal's firmware did.
-            Task { [device, feeder, settings] in
-                while true {
-                    let light = settings.statusLight
-                    device.setLight(light != .off && feeder.wantsFrames ? light : .off)
+            Task { [weak self] in
+                while let self {
+                    self.updateLight()
                     try? await Task.sleep(for: .milliseconds(500))
                 }
             }
